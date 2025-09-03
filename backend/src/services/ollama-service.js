@@ -6,7 +6,7 @@ const logger = createLogger('OllamaService');
 export class OllamaService {
     constructor() {
         this.client = new Ollama({
-            host: process.env.OLLAMA_HOST || 'http://localhost:11434'
+            host: process.env.OLLAMA_HOST || 'http://golem:11434'
         });
         this.defaultModel = process.env.OLLAMA_MODEL || 'gpt-oss:120b';
         this.defaultOptions = {
