@@ -1,0 +1,44 @@
+{
+  "name": "bais-api-server",
+  "version": "1.0.0",
+  "description": "BAIS Testing Interface API Server with Ollama Integration",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "jest",
+    "lint": "eslint src/",
+    "format": "prettier --write src/",
+    "validate": "npm run lint && npm run test"
+  },
+  "keywords": [
+    "ai-agents",
+    "bais",
+    "ollama",
+    "express",
+    "api"
+  ],
+  "author": "BAIS Research Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ollama": "^0.5.0",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "dotenv": "^16.3.1",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

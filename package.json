@@ -1,0 +1,38 @@
+{
+  "name": "bais-testing-interface",
+  "version": "1.0.0",
+  "description": "Business-Agent Integration Standard (BAIS) Testing Interface",
+  "main": "src/app.js",
+  "type": "module",
+  "scripts": {
+    "start": "npx http-server . -p 3000 -o",
+    "dev": "npx http-server . -p 3000 -o -c-1",
+    "test": "echo 'Tests will be implemented with Jest or Vitest'",
+    "lint": "npx eslint src/",
+    "format": "npx prettier --write src/",
+    "build": "echo 'Build process for production deployment'",
+    "validate": "npx html-validate index.html"
+  },
+  "keywords": [
+    "ai-agents",
+    "business-integration",
+    "bais",
+    "interoperability",
+    "standardization"
+  ],
+  "author": "BAIS Research Team",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^8.0.0",
+    "prettier": "^3.0.0",
+    "http-server": "^14.1.1",
+    "html-validate": "^8.0.0"
+  },
+  "browserslist": [
+    "defaults",
+    "not IE 11"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BAIS Agent Testing Interface</title>
+    <link rel="stylesheet" href="src/assets/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>BAIS Agent Testing Interface</h1>
+            <p>Test AI agents interacting with standardized business services through the Business-Agent Integration Standard</p>
+        </div>
+
+        <div class="main-content">
+            <div class="card">
+                <h2>
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    Business Service Selection
+                </h2>
+                
+                <div class="form-group">
+                    <label for="businessSelect">Select Business Service</label>
+                    <select id="businessSelect">
+                        <option value="">Choose a business...</option>
+                        <option value="hotel">Zion Adventure Lodge (Hotel)</option>
+                        <option value="restaurant">Red Canyon Brewing (Restaurant)</option>
+                        <option value="retail">Desert Pearl Gifts (Retail)</option>
+                    </select>
+                </div>
+
+                <div class="business-details" id="businessDetails" style="display: none;">
+                    <h3>Business Details</h3>
+                    <div class="detail-item">
+                        <span class="detail-label">Service Type:</span>
+                        <span class="detail-value" id="serviceType">-</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Location:</span>
+                        <span class="detail-value" id="location">-</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Available Services:</span>
+                        <span class="detail-value" id="services">-</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">BAIS Version:</span>
+                        <span class="detail-value" id="baisVersion">1.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>
+                    <svg class="icon" viewBox="0 0 24 24">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                        <polyline points="3.27,6.96 12,12.01 20.73,6.96"></polyline>
+                        <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                    </svg>
+                    Agent Request Configuration
+                </h2>
+
+                <div class="form-group">
+                    <label for="requestType">Request Type</label>
+                    <select id="requestType">
+                        <option value="">Select request type...</option>
+                        <option value="search">Search Available Services</option>
+                        <option value="book">Make a Reservation/Booking</option>
+                        <option value="modify">Modify Existing Booking</option>
+                        <option value="cancel">Cancel Booking</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="userPreferences">User Preferences</label>
+                    <textarea id="userPreferences" rows="3" placeholder="e.g., Prefer rooms with mountain view, dietary restrictions: vegetarian, budget under $200"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="specificRequest">Specific Request Details</label>
+                    <textarea id="specificRequest" rows="4" placeholder="e.g., Looking for a 2-night stay from Dec 15-17 for 2 guests, with breakfast included"></textarea>
+                </div>
+
+                <button class="test-button" id="testButton">
+                    Test Agent Integration
+                </button>
+
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Agent processing request through BAIS protocol...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="results" id="results">
+            <h3>
+                <svg class="icon" viewBox="0 0 24 24">
+                    <polyline points="9,11 12,14 22,4"></polyline>
+                    <path d="m21,4-10,8-4-4"></path>
+                </svg>
+                Agent Response
+            </h3>
+            <div id="errorContainer"></div>
+            <div class="agent-response" id="agentResponse"></div>
+        </div>
+    </div>
+
+    <!-- Load JavaScript modules -->
+    <script type="module" src="src/app.js"></script>
+</body>
+</html>
