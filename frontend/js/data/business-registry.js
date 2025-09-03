@@ -1,4 +1,4 @@
-import { BUSINESS_TYPES } from '../../frontend/js/config/constants.js';
+import { BUSINESS_TYPES } from '../config/constants.js'; 
 
 export const BUSINESS_REGISTRY = {
     [BUSINESS_TYPES.HOTEL]: {
