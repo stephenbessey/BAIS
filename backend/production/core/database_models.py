@@ -537,8 +537,8 @@ class MetricsRepository:
     
     def aggregate_daily_metrics(self, business_id: uuid.UUID, date: datetime):
         """Aggregate daily metrics for a business"""
-        # This would typically be run by a background job
-        # Implementation would calculate daily totals from interaction and booking data
+        # This needs to be run by a background job
+        # Implementation needs calculate daily totals from interaction and booking data
         pass
 
 # Database initialization

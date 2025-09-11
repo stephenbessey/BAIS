@@ -102,7 +102,7 @@ class BAISA2AServer:
         async def discover_agents(request: A2ADiscoveryRequest) -> A2ADiscoveryResponse:
             """Discover compatible agents"""
             # For business services, we primarily expose our own capabilities
-            # In a full implementation, this would query a registry
+            # In a full implementation, this needs to be query a registry
             
             matching_agents = []
             

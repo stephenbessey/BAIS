@@ -1,0 +1,26 @@
+{
+  "hotel": {
+    "name": "Zion Adventure Lodge",
+    "type": "hospitality",
+    "serviceType": "Hospitality",
+    "location": "Springdale, UT",
+    "services": "Rooms, Restaurant, Activities",
+    "capabilities": ["search", "book", "modify", "cancel"]
+  },
+  "restaurant": {
+    "name": "Red Canyon Brewing",
+    "type": "food_service",
+    "serviceType": "Food Service",
+    "location": "Springdale, UT",
+    "services": "Dining, Catering, Events",
+    "capabilities": ["search", "book", "modify", "cancel"]
+  },
+  "retail": {
+    "name": "Desert Pearl Gifts",
+    "type": "retail",
+    "serviceType": "Retail",
+    "location": "Springdale, UT",
+    "services": "Gifts, Souvenirs, Local Crafts",
+    "capabilities": ["search", "book"]
+  }
+}

@@ -341,7 +341,7 @@ class BusinessSystemAdapter:
     
     async def get_availability(self, service_id: str) -> Dict[str, Any]:
         """Get real-time availability from business system"""
-        # This would integrate with actual PMS/POS systems
+        # This needs to integrate with actual PMS/POS systems
         # For demo purposes, return mock data
         return {
             "available_slots": [

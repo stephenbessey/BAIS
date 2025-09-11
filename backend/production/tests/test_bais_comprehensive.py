@@ -545,7 +545,7 @@ class TestProductionAPI:
         response = test_client.post("/api/v1/businesses", json=sample_business_data)
         
         # Note: This will fail without proper database setup
-        # In real tests, you'd mock the database or use test database
+        # In tests, need mock the database or use test database
         assert response.status_code in [200, 201, 500]  # 500 expected without DB
     
     def test_schema_validation_endpoint(self, test_client):
@@ -569,7 +569,7 @@ class TestIntegrationScenarios:
     @pytest.mark.asyncio
     async def test_end_to_end_booking_flow(self):
         """Test complete booking flow from agent to business"""
-        # This would test the full flow:
+        # This  test the full flow:
         # 1. Agent discovers business via A2A
         # 2. Agent authenticates via OAuth
         # 3. Agent searches availability via MCP

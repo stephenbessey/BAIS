@@ -497,7 +497,7 @@ class BAISOAuth2Middleware:
         """Decorator factory for requiring specific permissions"""
         def permission_checker(token_info: OAuth2IntrospectionResponse = Depends(self.verify_token)):
             if not self.oauth_provider.validate_token_permissions(
-                token_info.client_id,  # This would need the actual token
+                token_info.client_id,  # This needs to be the actual token
                 permission
             ):
                 raise HTTPException(status_code=403, detail="Insufficient permissions")
