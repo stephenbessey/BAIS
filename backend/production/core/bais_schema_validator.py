@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, validator
 from datetime import datetime, date
 import json
 from enum import Enum
+from dataclasses import dataclass
 
 class ServiceType(str, Enum):
     HOSPITALITY = "hospitality"
@@ -217,6 +218,29 @@ class BAISBusinessSchema(BaseModel):
         
         return issues
 
+@dataclass
+class SchemaValidationResult:
+    """Result of schema validation"""
+    is_valid: bool
+    issues: List[str]
+    schema: Optional[BAISBusinessSchema] = None
+    warnings: List[str] = None
+    
+    def __post_init__(self):
+        if self.warnings is None:
+            self.warnings = []
+    
+    @classmethod
+    def success(cls, schema: BAISBusinessSchema) -> 'SchemaValidationResult':
+        """Create a successful validation result"""
+        return cls(is_valid=True, issues=[], schema=schema)
+    
+    @classmethod
+    def failure(cls, issues: List[str], warnings: List[str] = None) -> 'SchemaValidationResult':
+        """Create a failed validation result"""
+        return cls(is_valid=False, issues=issues, warnings=warnings or [])
+
+
 class BAISSchemaValidator:
     """Validator for BAIS business schemas"""
     
@@ -224,17 +248,72 @@ class BAISSchemaValidator:
     def validate_schema(schema_data: Dict[str, Any]) -> tuple[bool, List[str]]:
         """Validate a BAIS schema and return validation result"""
         try:
-            schema = BAISBusinessSchema(**schema_data)
+            validation_result = BAISSchemaValidator._validate_schema_structure(schema_data)
+            if not validation_result.is_valid:
+                return False, validation_result.issues
             
-            # Additional validations
-            issues = []
-            issues.extend(schema.validate_mcp_compatibility())
-            issues.extend(schema.validate_a2a_compatibility())
+            schema = validation_result.schema
+            validation_result = BAISSchemaValidator._run_comprehensive_validation(schema)
             
-            return len(issues) == 0, issues
+            return validation_result.is_valid, validation_result.issues
             
         except Exception as e:
-            return False, [str(e)]
+            return False, [f"Schema validation error: {str(e)}"]
+    
+    @staticmethod
+    def _validate_schema_structure(schema_data: Dict[str, Any]) -> SchemaValidationResult:
+        """Validate basic schema structure and parsing"""
+        try:
+            schema = BAISBusinessSchema(**schema_data)
+            return SchemaValidationResult.success(schema)
+        except Exception as e:
+            return SchemaValidationResult.failure([f"Schema parsing error: {str(e)}"])
+    
+    @staticmethod
+    def _run_comprehensive_validation(schema: BAISBusinessSchema) -> SchemaValidationResult:
+        """Run comprehensive validation on parsed schema"""
+        issues = []
+        
+        # Validate MCP compatibility
+        mcp_issues = schema.validate_mcp_compatibility()
+        issues.extend(mcp_issues)
+        
+        # Validate A2A compatibility
+        a2a_issues = schema.validate_a2a_compatibility()
+        issues.extend(a2a_issues)
+        
+        # Validate business-specific requirements
+        business_issues = BAISSchemaValidator._validate_business_requirements(schema)
+        issues.extend(business_issues)
+        
+        return SchemaValidationResult(
+            is_valid=len(issues) == 0,
+            issues=issues,
+            schema=schema if len(issues) == 0 else None
+        )
+    
+    @staticmethod
+    def _validate_business_requirements(schema: BAISBusinessSchema) -> List[str]:
+        """Validate business-specific requirements"""
+        issues = []
+        
+        # Check if business has at least one service
+        if not schema.services:
+            issues.append("Business must have at least one service")
+        
+        # Validate service IDs are unique
+        service_ids = [service.id for service in schema.services]
+        if len(service_ids) != len(set(service_ids)):
+            issues.append("Service IDs must be unique")
+        
+        # Validate required endpoints
+        if not schema.integration.mcp_server.endpoint:
+            issues.append("MCP server endpoint is required")
+        
+        if not schema.integration.a2a_endpoint.discovery_url:
+            issues.append("A2A discovery URL is required")
+        
+        return issues
     
     @staticmethod
     def create_hospitality_template() -> BAISBusinessSchema:

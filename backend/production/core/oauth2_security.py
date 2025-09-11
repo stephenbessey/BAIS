@@ -121,69 +121,27 @@ class BAISOAuth2Provider:
     """OAuth 2.0 Provider for BAIS with business-specific permissions"""
     
     def __init__(self, secret_key: str = None):
+        from .oauth2_client_manager import OAuth2ClientManager
+        from .oauth2_token_service import OAuth2TokenService
+        from .oauth2_authorization_service import OAuth2AuthorizationService
+        
         self.secret_key = secret_key or secrets.token_urlsafe(32)
-        self.algorithm = "HS256"
-        self.access_token_expire_minutes = 60
-        self.refresh_token_expire_days = 30
         
-        # Storage (in production, use proper database)
-        self.clients: Dict[str, OAuth2ClientCredentials] = {}
-        self.authorization_codes: Dict[str, Dict[str, Any]] = {}
-        self.access_tokens: Dict[str, Dict[str, Any]] = {}
-        self.refresh_tokens: Dict[str, Dict[str, Any]] = {}
-        
-        # Initialize with default BAIS client
-        self._initialize_default_clients()
-    
-    def _initialize_default_clients(self):
-        """Initialize default OAuth clients for BAIS"""
-        # Business management client
-        business_client = OAuth2ClientCredentials(
-            client_id="bais_business_mgmt",
-            client_secret=self._hash_secret("bais_business_secret_2024"),
-            client_name="BAIS Business Management",
-            redirect_uris=["http://localhost:3000/auth/callback"],
-            scopes=["read", "manage"],
-            grant_types=["authorization_code", "client_credentials"]
+        # Initialize services with single responsibilities
+        self.client_manager = OAuth2ClientManager()
+        self.token_service = OAuth2TokenService(self.secret_key)
+        self.authorization_service = OAuth2AuthorizationService(
+            self.token_service, 
+            self.client_manager
         )
-        self.clients[business_client.client_id] = business_client
-        
-        # Agent client
-        agent_client = OAuth2ClientCredentials(
-            client_id="bais_ai_agent",
-            client_secret=self._hash_secret("bais_agent_secret_2024"),
-            client_name="BAIS AI Agent",
-            redirect_uris=["http://localhost:8000/auth/callback"],
-            scopes=["read", "search", "book"],
-            grant_types=["client_credentials"]
-        )
-        self.clients[agent_client.client_id] = agent_client
-    
-    def _hash_secret(self, secret: str) -> str:
-        """Hash client secret"""
-        return bcrypt.hashpw(secret.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    
-    def _verify_secret(self, secret: str, hashed: str) -> bool:
-        """Verify client secret"""
-        return bcrypt.checkpw(secret.encode('utf-8'), hashed.encode('utf-8'))
     
     def register_client(self, client_data: OAuth2ClientCredentials) -> str:
         """Register a new OAuth client"""
-        # Hash the client secret
-        client_data.client_secret = self._hash_secret(client_data.client_secret)
-        
-        # Store client
-        self.clients[client_data.client_id] = client_data
-        
-        return client_data.client_id
+        return self.client_manager.register_client(client_data)
     
     def validate_client(self, client_id: str, client_secret: str) -> bool:
         """Validate client credentials"""
-        if client_id not in self.clients:
-            return False
-        
-        client = self.clients[client_id]
-        return self._verify_secret(client_secret, client.client_secret)
+        return self.client_manager.validate_client(client_id, client_secret)
     
     def create_authorization_code(self, 
                                  client_id: str, 
@@ -193,30 +151,9 @@ class BAISOAuth2Provider:
                                  business_id: str = None,
                                  agent_id: str = None) -> str:
         """Create authorization code for OAuth flow"""
-        
-        if client_id not in self.clients:
-            raise ValueError("Invalid client_id")
-        
-        client = self.clients[client_id]
-        if redirect_uri not in client.redirect_uris:
-            raise ValueError("Invalid redirect_uri")
-        
-        # Generate authorization code
-        code = secrets.token_urlsafe(32)
-        
-        # Store authorization code data
-        self.authorization_codes[code] = {
-            "client_id": client_id,
-            "redirect_uri": redirect_uri,
-            "scope": scope,
-            "state": state,
-            "business_id": business_id,
-            "agent_id": agent_id,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.utcnow() + timedelta(minutes=10)
-        }
-        
-        return code
+        return self.authorization_service.create_authorization_code(
+            client_id, redirect_uri, scope, state, business_id, agent_id
+        )
     
     def exchange_code_for_token(self, request: OAuth2TokenRequest) -> OAuth2TokenResponse:
         """Exchange authorization code for access token"""
@@ -226,252 +163,21 @@ class BAISOAuth2Provider:
             raise HTTPException(status_code=401, detail="Invalid client credentials")
         
         if request.grant_type == "authorization_code":
-            return self._handle_authorization_code_grant(request)
+            return self.authorization_service.handle_authorization_code_grant(request)
         elif request.grant_type == "client_credentials":
-            return self._handle_client_credentials_grant(request)
+            return self.authorization_service.handle_client_credentials_grant(request)
         elif request.grant_type == "refresh_token":
-            return self._handle_refresh_token_grant(request)
+            return self.authorization_service.handle_refresh_token_grant(request)
         else:
             raise HTTPException(status_code=400, detail="Unsupported grant type")
     
-    def _handle_authorization_code_grant(self, request: OAuth2TokenRequest) -> OAuth2TokenResponse:
-        """Handle authorization code grant"""
-        if not request.code:
-            raise HTTPException(status_code=400, detail="Authorization code required")
-        
-        # Validate authorization code
-        if request.code not in self.authorization_codes:
-            raise HTTPException(status_code=400, detail="Invalid authorization code")
-        
-        code_data = self.authorization_codes[request.code]
-        
-        # Check expiration
-        if datetime.utcnow() > code_data["expires_at"]:
-            del self.authorization_codes[request.code]
-            raise HTTPException(status_code=400, detail="Authorization code expired")
-        
-        # Validate client and redirect URI
-        if code_data["client_id"] != request.client_id:
-            raise HTTPException(status_code=400, detail="Client mismatch")
-        
-        if code_data["redirect_uri"] != request.redirect_uri:
-            raise HTTPException(status_code=400, detail="Redirect URI mismatch")
-        
-        # Generate tokens
-        access_token = self._create_access_token(
-            client_id=request.client_id,
-            scope=code_data["scope"],
-            business_id=code_data["business_id"],
-            agent_id=code_data["agent_id"]
-        )
-        
-        refresh_token = self._create_refresh_token(
-            client_id=request.client_id,
-            scope=code_data["scope"],
-            business_id=code_data["business_id"],
-            agent_id=code_data["agent_id"]
-        )
-        
-        # Clean up authorization code
-        del self.authorization_codes[request.code]
-        
-        return OAuth2TokenResponse(
-            access_token=access_token,
-            expires_in=self.access_token_expire_minutes * 60,
-            refresh_token=refresh_token,
-            scope=code_data["scope"]
-        )
-    
-    def _handle_client_credentials_grant(self, request: OAuth2TokenRequest) -> OAuth2TokenResponse:
-        """Handle client credentials grant for machine-to-machine auth"""
-        
-        # Generate access token for client
-        access_token = self._create_access_token(
-            client_id=request.client_id,
-            scope=request.scope or "read"
-        )
-        
-        return OAuth2TokenResponse(
-            access_token=access_token,
-            expires_in=self.access_token_expire_minutes * 60,
-            scope=request.scope or "read"
-        )
-    
-    def _handle_refresh_token_grant(self, request: OAuth2TokenRequest) -> OAuth2TokenResponse:
-        """Handle refresh token grant"""
-        if not request.refresh_token:
-            raise HTTPException(status_code=400, detail="Refresh token required")
-        
-        # Validate refresh token
-        if request.refresh_token not in self.refresh_tokens:
-            raise HTTPException(status_code=400, detail="Invalid refresh token")
-        
-        token_data = self.refresh_tokens[request.refresh_token]
-        
-        # Check expiration
-        if datetime.utcnow() > token_data["expires_at"]:
-            del self.refresh_tokens[request.refresh_token]
-            raise HTTPException(status_code=400, detail="Refresh token expired")
-        
-        # Generate new access token
-        access_token = self._create_access_token(
-            client_id=token_data["client_id"],
-            scope=token_data["scope"],
-            business_id=token_data["business_id"],
-            agent_id=token_data["agent_id"]
-        )
-        
-        return OAuth2TokenResponse(
-            access_token=access_token,
-            expires_in=self.access_token_expire_minutes * 60,
-            scope=token_data["scope"]
-        )
-    
-    def _create_access_token(self, 
-                           client_id: str,
-                           scope: str = None,
-                           business_id: str = None,
-                           agent_id: str = None) -> str:
-        """Create JWT access token"""
-        
-        now = datetime.utcnow()
-        expires = now + timedelta(minutes=self.access_token_expire_minutes)
-        
-        payload = {
-            "iss": "bais-oauth-provider",
-            "sub": client_id,
-            "aud": "bais-api",
-            "iat": int(now.timestamp()),
-            "exp": int(expires.timestamp()),
-            "client_id": client_id,
-            "scope": scope,
-            "token_type": "access_token"
-        }
-        
-        if business_id:
-            payload["business_id"] = business_id
-        
-        if agent_id:
-            payload["agent_id"] = agent_id
-        
-        # Generate JWT
-        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
-        
-        # Store token metadata
-        self.access_tokens[token] = {
-            "client_id": client_id,
-            "scope": scope,
-            "business_id": business_id,
-            "agent_id": agent_id,
-            "created_at": now,
-            "expires_at": expires
-        }
-        
-        return token
-    
-    def _create_refresh_token(self,
-                            client_id: str,
-                            scope: str = None,
-                            business_id: str = None,
-                            agent_id: str = None) -> str:
-        """Create refresh token"""
-        
-        token = secrets.token_urlsafe(64)
-        expires = datetime.utcnow() + timedelta(days=self.refresh_token_expire_days)
-        
-        self.refresh_tokens[token] = {
-            "client_id": client_id,
-            "scope": scope,
-            "business_id": business_id,
-            "agent_id": agent_id,
-            "created_at": datetime.utcnow(),
-            "expires_at": expires
-        }
-        
-        return token
-    
     def introspect_token(self, token: str) -> OAuth2IntrospectionResponse:
         """Introspect access token"""
-        try:
-            # Decode JWT
-            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
-            
-            # Check if token is still valid in our storage
-            if token not in self.access_tokens:
-                return OAuth2IntrospectionResponse(active=False)
-            
-            token_data = self.access_tokens[token]
-            
-            # Check expiration
-            if datetime.utcnow() > token_data["expires_at"]:
-                del self.access_tokens[token]
-                return OAuth2IntrospectionResponse(active=False)
-            
-            return OAuth2IntrospectionResponse(
-                active=True,
-                client_id=payload.get("client_id"),
-                scope=payload.get("scope"),
-                exp=payload.get("exp"),
-                iat=payload.get("iat"),
-                business_id=payload.get("business_id"),
-                agent_id=payload.get("agent_id")
-            )
-            
-        except jwt.InvalidTokenError:
-            return OAuth2IntrospectionResponse(active=False)
+        return self.token_service.introspect_token(token)
     
     def validate_token_permissions(self, token: str, required_permission: BAISPermission) -> bool:
         """Validate if token has required permissions"""
-        introspection = self.introspect_token(token)
-        
-        if not introspection.active:
-            return False
-        
-        # Check scope permissions
-        token_scopes = introspection.scope.split() if introspection.scope else []
-        
-        for scope_name in token_scopes:
-            if scope_name not in BAIS_SCOPES:
-                continue
-            
-            scope = BAIS_SCOPES[scope_name]
-            
-            for permission in scope.permissions:
-                if self._permission_matches(permission, required_permission, introspection):
-                    return True
-        
-        return False
-    
-    def _permission_matches(self, 
-                          granted: BAISPermission, 
-                          required: BAISPermission,
-                          token_info: OAuth2IntrospectionResponse) -> bool:
-        """Check if granted permission matches required permission"""
-        
-        # Resource must match
-        if granted.resource != required.resource:
-            return False
-        
-        # Action must match
-        if granted.action != required.action:
-            return False
-        
-        # Business ID constraint
-        if required.business_id:
-            # If permission specifies business_id, it must match
-            if granted.business_id and granted.business_id != required.business_id:
-                return False
-            
-            # If token is business-scoped, it must match
-            if token_info.business_id and token_info.business_id != required.business_id:
-                return False
-        
-        # Service ID constraint
-        if required.service_id:
-            if granted.service_id and granted.service_id != required.service_id:
-                return False
-        
-        return True
+        return self.authorization_service.validate_token_permissions(token, required_permission)
 
 # FastAPI Integration
 class BAISOAuth2Middleware:
