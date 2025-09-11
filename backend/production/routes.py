@@ -1,25 +1,79 @@
 from fastapi import APIRouter, Depends, BackgroundTasks
+from functools import lru_cache
+from typing import Dict, Any, Optional
 from .services.business_service import BusinessService
 from .services.agent_service import AgentService
 from .api_models import *
 from .core.database_models import DatabaseManager
 from .core.mcp_server_generator import BusinessSystemAdapter
+from .config.settings import get_settings, get_database_url
+from .core.exceptions import ConfigurationError
 
-# Dependency Injection Providers
-def get_db_manager():
-    # This needs to be a managed singleton
-    return DatabaseManager("postgresql://user:password@localhost/bais_db")
+
+class DependencyContainer:
+    """Dependency injection container for BAIS services"""
+    
+    def __init__(self):
+        self._db_manager: Optional[DatabaseManager] = None
+        self._settings = None
+    
+    @property
+    def settings(self):
+        """Get application settings"""
+        if self._settings is None:
+            self._settings = get_settings()
+        return self._settings
+    
+    @property
+    def db_manager(self) -> DatabaseManager:
+        """Get database manager instance"""
+        if self._db_manager is None:
+            database_url = get_database_url()
+            self._db_manager = DatabaseManager(database_url)
+        return self._db_manager
+
+
+# Global dependency container
+_container = DependencyContainer()
+
+
+def get_db_manager() -> DatabaseManager:
+    """Get database manager dependency"""
+    return _container.db_manager
+
 
 def get_business_service(
     db: DatabaseManager = Depends(get_db_manager),
     bg_tasks: BackgroundTasks = BackgroundTasks()
 ) -> BusinessService:
+    """Get business service dependency"""
     return BusinessService(db_manager=db, background_tasks=bg_tasks)
 
-def get_agent_service() -> AgentService:
-    # The adapter needs to be dynamically loaded based on the business
-    adapter = BusinessSystemAdapter(business_config={}) 
-    return AgentService(business_adapter=adapter)
+
+def get_business_config() -> Dict[str, Any]:
+    """Get business configuration for adapters"""
+    settings = _container.settings
+    return {
+        "oauth_client_id": settings.oauth.client_id,
+        "oauth_client_secret": settings.oauth.client_secret,
+        "api_timeout": settings.api.timeout_seconds,
+        "max_retries": settings.api.max_retries,
+        "environment": settings.bais.environment
+    }
+
+
+def get_agent_service(
+    business_config: Dict[str, Any] = Depends(get_business_config)
+) -> AgentService:
+    """Get agent service dependency with proper configuration"""
+    try:
+        adapter = BusinessSystemAdapter(business_config=business_config)
+        return AgentService(business_adapter=adapter)
+    except Exception as e:
+        raise ConfigurationError(
+            f"Failed to create agent service: {str(e)}",
+            config_key="business_config"
+        )
 
 
 # Router Setup

@@ -6,6 +6,7 @@ Replaces functions with many parameters with structured data objects
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional
 from uuid import UUID
+from .constants import DatabaseLimits, BusinessLimits
 
 
 @dataclass
@@ -14,8 +15,8 @@ class BusinessSearchCriteria:
     business_type: Optional[str] = None
     status: Optional[str] = None
     city: Optional[str] = None
-    limit: int = 100
-    offset: int = 0
+    limit: int = DatabaseLimits.DEFAULT_QUERY_LIMIT
+    offset: int = DatabaseLimits.DEFAULT_OFFSET
 
 
 @dataclass
@@ -71,7 +72,7 @@ class APIKeyCreationRequest:
     key_name: str
     scopes: List[str]
     permissions: Dict[str, Any] = None
-    rate_limit_per_hour: int = 1000
+    rate_limit_per_hour: int = BusinessLimits.DEFAULT_RATE_LIMIT_PER_HOUR
     expires_at: Optional[str] = None
 
 
@@ -84,8 +85,8 @@ class BookingSearchCriteria:
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     customer_email: Optional[str] = None
-    limit: int = 50
-    offset: int = 0
+    limit: int = DatabaseLimits.DEFAULT_QUERY_LIMIT // 2  # Smaller limit for bookings
+    offset: int = DatabaseLimits.DEFAULT_OFFSET
 
 
 @dataclass

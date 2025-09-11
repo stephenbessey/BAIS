@@ -295,23 +295,62 @@ class BAISSchemaValidator:
     @staticmethod
     def _validate_business_requirements(schema: BAISBusinessSchema) -> List[str]:
         """Validate business-specific requirements"""
+        validators = [
+            BAISSchemaValidator._validate_has_services,
+            BAISSchemaValidator._validate_unique_service_ids,
+            BAISSchemaValidator._validate_required_endpoints,
+            BAISSchemaValidator._validate_business_info_completeness
+        ]
+        
         issues = []
-        
-        # Check if business has at least one service
+        for validator in validators:
+            issues.extend(validator(schema))
+        return issues
+    
+    @staticmethod
+    def _validate_has_services(schema: BAISBusinessSchema) -> List[str]:
+        """Validate that business has at least one service"""
         if not schema.services:
-            issues.append("Business must have at least one service")
+            return ["Business must have at least one service"]
+        return []
+    
+    @staticmethod
+    def _validate_unique_service_ids(schema: BAISBusinessSchema) -> List[str]:
+        """Validate that service IDs are unique"""
+        if not schema.services:
+            return []
         
-        # Validate service IDs are unique
         service_ids = [service.id for service in schema.services]
         if len(service_ids) != len(set(service_ids)):
-            issues.append("Service IDs must be unique")
+            return ["Service IDs must be unique within a business"]
+        return []
+    
+    @staticmethod
+    def _validate_required_endpoints(schema: BAISBusinessSchema) -> List[str]:
+        """Validate that required integration endpoints are present"""
+        issues = []
         
-        # Validate required endpoints
         if not schema.integration.mcp_server.endpoint:
             issues.append("MCP server endpoint is required")
         
         if not schema.integration.a2a_endpoint.discovery_url:
             issues.append("A2A discovery URL is required")
+        
+        return issues
+    
+    @staticmethod
+    def _validate_business_info_completeness(schema: BAISBusinessSchema) -> List[str]:
+        """Validate that business info is complete"""
+        issues = []
+        
+        if not schema.business_info.name or len(schema.business_info.name.strip()) == 0:
+            issues.append("Business name is required")
+        
+        if not schema.business_info.location.address:
+            issues.append("Business address is required")
+        
+        if not schema.business_info.location.city:
+            issues.append("Business city is required")
         
         return issues
     
