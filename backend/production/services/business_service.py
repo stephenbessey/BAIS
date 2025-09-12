@@ -20,10 +20,31 @@ from ..api_models import (
 from ..core.database_models import DatabaseManager, BusinessRepository
 from ..core.bais_schema_validator import BAISSchemaValidator
 from ..utils.schema_factory import BusinessSchemaFactory
+from ..core.exceptions import (
+    BusinessRegistrationError,
+    SchemaValidationError,
+    BusinessNotFoundError,
+    DatabaseError
+)
 
 
-class BusinessRegistrationError(Exception):
+class BusinessServiceError(Exception):
+    """Base exception for business service operations"""
+    pass
+
+
+class BusinessRegistrationError(BusinessServiceError):
     """Raised when business registration fails"""
+    pass
+
+
+class BusinessNotFoundError(BusinessServiceError):
+    """Raised when a business is not found"""
+    pass
+
+
+class SchemaValidationError(BusinessServiceError):
+    """Raised when schema validation fails"""
     pass
 
 
@@ -51,12 +72,8 @@ class BusinessService:
         """
         Register a new business in the BAIS system.
         
-        This method performs the following steps:
-        1. Creates a business schema from the registration request
-        2. Validates the schema against BAIS standards
-        3. Generates secure API keys
-        4. Persists the business data
-        5. Initiates background server setup
+        This method orchestrates the complete business registration workflow
+        by delegating to focused, single-responsibility methods.
         
         Args:
             request: Business registration request containing business details
@@ -68,19 +85,31 @@ class BusinessService:
             HTTPException: If schema validation fails or registration encounters errors
         """
         try:
-            schema = self._create_business_schema(request)
-            self._validate_business_schema(schema)
+            # Step 1: Create and validate business schema
+            schema = await self._create_and_validate_schema(request)
+            
+            # Step 2: Generate secure API key
             api_key = self._generate_secure_api_key(schema.business_info.id)
             
+            # Step 3: Persist business data
             await self._persist_business_data(schema, api_key)
+            
+            # Step 4: Schedule server setup
             self._schedule_server_setup(schema)
             
+            # Step 5: Build and return response
             return self._build_registration_response(schema, api_key)
             
         except BusinessRegistrationError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+    
+    async def _create_and_validate_schema(self, request: BusinessRegistrationRequest):
+        """Create business schema and validate it against BAIS standards."""
+        schema = self._create_business_schema(request)
+        self._validate_business_schema(schema)
+        return schema
     
     async def get_business_status(self, business_id: str) -> BusinessStatusResponse:
         """
@@ -98,7 +127,7 @@ class BusinessService:
         try:
             business_data = await self._business_repository.get_business_by_id(business_id)
             if not business_data:
-                raise HTTPException(status_code=404, detail=f"Business {business_id} not found")
+                raise BusinessNotFoundError(f"Business {business_id} not found")
             
             metrics = await self._gather_business_metrics(business_id)
             
@@ -113,20 +142,25 @@ class BusinessService:
                 metrics=metrics
             )
             
-        except HTTPException:
-            raise
+        except BusinessNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Status retrieval failed: {str(e)}")
     
-    def _create_business_schema(self, request: BusinessRegistrationRequest):
+    def _create_business_schema(self, registration_request: BusinessRegistrationRequest):
         """Create a business schema from the registration request."""
-        return BusinessSchemaFactory.create_from_request(request)
+        return BusinessSchemaFactory.create_from_request(registration_request)
     
-    def _validate_business_schema(self, schema) -> None:
+    def _validate_business_schema(self, business_schema) -> None:
         """Validate the business schema against BAIS standards."""
-        is_valid, issues = BAISSchemaValidator.validate_schema(schema.dict())
-        if not is_valid:
-            raise BusinessRegistrationError(f"Invalid business schema: {'; '.join(issues)}")
+        try:
+            is_valid, validation_issues = BAISSchemaValidator.validate_schema(business_schema.dict())
+            if not is_valid:
+                raise SchemaValidationError(f"Invalid business schema: {'; '.join(validation_issues)}")
+        except Exception as validation_error:
+            if isinstance(validation_error, SchemaValidationError):
+                raise
+            raise SchemaValidationError(f"Schema validation failed: {str(validation_error)}")
     
     def _generate_secure_api_key(self, business_id: str) -> str:
         """
@@ -144,26 +178,26 @@ class BusinessService:
         data = f"{business_id}:{timestamp}:{random_uuid}".encode()
         return hashlib.sha256(data).hexdigest()
     
-    async def _persist_business_data(self, schema, api_key: str) -> None:
+    async def _persist_business_data(self, business_schema, generated_api_key: str) -> None:
         """Persist business data to the database."""
         # Implementation would save to database here
         # For now, this is a placeholder for the actual persistence logic
         pass
     
-    def _schedule_server_setup(self, schema) -> None:
+    def _schedule_server_setup(self, business_schema) -> None:
         """Schedule background task for server setup."""
         # Implementation would add background task here
-        # self.background_tasks.add_task(setup_business_servers, schema)
+        # self.background_tasks.add_task(setup_business_servers, business_schema)
         pass
     
-    def _build_registration_response(self, schema, api_key: str) -> BusinessRegistrationResponse:
+    def _build_registration_response(self, business_schema, generated_api_key: str) -> BusinessRegistrationResponse:
         """Build the registration response."""
         return BusinessRegistrationResponse(
-            business_id=schema.business_info.id,
+            business_id=business_schema.business_info.id,
             status="registered",
-            mcp_endpoint=schema.integration.mcp_server.endpoint,
-            a2a_endpoint=schema.integration.a2a_endpoint.discovery_url,
-            api_keys={"primary": api_key},
+            mcp_endpoint=business_schema.integration.mcp_server.endpoint,
+            a2a_endpoint=business_schema.integration.a2a_endpoint.discovery_url,
+            api_keys={"primary": generated_api_key},
             setup_complete=False  # Will be updated by background task
         )
     

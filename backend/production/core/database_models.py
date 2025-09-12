@@ -13,9 +13,12 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy import create_engine, event
 from datetime import datetime
 import uuid
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from pydantic import BaseModel
 import json
+
+if TYPE_CHECKING:
+    from .parameter_objects import BusinessSearchCriteria
 
 Base = declarative_base()
 
@@ -400,23 +403,18 @@ class BusinessRepository:
             self.db.refresh(business)
         return business
     
-    def list_businesses(self, 
-                       business_type: Optional[str] = None,
-                       status: Optional[str] = None,
-                       city: Optional[str] = None,
-                       limit: int = 100,
-                       offset: int = 0) -> List[Business]:
-        """List businesses with filters"""
+    def list_businesses(self, criteria: 'BusinessSearchCriteria') -> List[Business]:
+        """List businesses with search criteria"""
         query = self.db.query(Business)
         
-        if business_type:
-            query = query.filter(Business.business_type == business_type)
-        if status:
-            query = query.filter(Business.status == status)
-        if city:
-            query = query.filter(Business.city.ilike(f"%{city}%"))
+        if criteria.business_type:
+            query = query.filter(Business.business_type == criteria.business_type)
+        if criteria.status:
+            query = query.filter(Business.status == criteria.status)
+        if criteria.city:
+            query = query.filter(Business.city.ilike(f"%{criteria.city}%"))
         
-        return query.offset(offset).limit(limit).all()
+        return query.offset(criteria.offset).limit(criteria.limit).all()
     
     def delete_business(self, business_id: uuid.UUID) -> bool:
         """Delete business"""
