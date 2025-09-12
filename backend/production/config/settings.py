@@ -5,7 +5,8 @@ Centralized configuration management using Pydantic BaseSettings
 
 import os
 from typing import Optional, List
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, validator
+from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 

@@ -42,13 +42,13 @@ class Location(BaseModel):
     state: str = Field(..., min_length=2, max_length=50)
     postal_code: Optional[str] = Field(None, max_length=20)
     country: str = Field(default="US", max_length=5)
-    coordinates: Optional[List[float]] = Field(None, min_items=2, max_items=2)
+    coordinates: Optional[List[float]] = Field(None, min_length=2, max_length=2)
     timezone: str = Field(default="UTC", max_length=50)
 
 class ContactInfo(BaseModel):
-    website: Optional[str] = Field(None, regex=r'^https?://.+')
-    phone: Optional[str] = Field(None, regex=r'^\+?[1-9]\d{1,14}$')
-    email: Optional[str] = Field(None, regex=r'^[^@]+@[^@]+\.[^@]+$')
+    website: Optional[str] = Field(None, pattern=r'^https?://.+')
+    phone: Optional[str] = Field(None, pattern=r'^\+?[1-9]\d{1,14}$')
+    email: Optional[str] = Field(None, pattern=r'^[^@]+@[^@]+\.[^@]+$')
 
 class BusinessInfo(BaseModel):
     id: str = Field(..., min_length=1, max_length=100)
@@ -68,7 +68,7 @@ class PricingModel(BaseModel):
     minimum_charge: Optional[float] = Field(None, ge=0)
 
 class ServiceParameter(BaseModel):
-    type: str = Field(..., regex=r'^(string|integer|number|boolean|array|object)$')
+    type: str = Field(..., pattern=r'^(string|integer|number|boolean|array|object)$')
     description: str = Field(..., min_length=1, max_length=500)
     required: bool = Field(default=False)
     default: Optional[Any] = None
@@ -92,7 +92,7 @@ class WorkflowDefinition(BaseModel):
     requires_human_approval: bool = Field(default=False)
 
 class AvailabilityConfig(BaseModel):
-    endpoint: str = Field(..., regex=r'^/api/.+')
+    endpoint: str = Field(..., pattern=r'^/api/.+')
     real_time: bool = Field(default=True)
     cache_timeout_seconds: int = Field(default=300, ge=0, le=3600)
     advance_booking_days: int = Field(default=365, ge=1, le=730)
@@ -106,7 +106,7 @@ class CancellationPolicyDetails(BaseModel):
 class PaymentConfig(BaseModel):
     methods: List[PaymentMethod] = Field(..., min_items=1)
     processing: str = Field(default="secure_tokenized")
-    timing: str = Field(default="at_booking", regex=r'^(at_booking|on_arrival|after_service)$')
+    timing: str = Field(default="at_booking", pattern=r'^(at_booking|on_arrival|after_service)$')
     deposit_required: bool = Field(default=False)
     deposit_percentage: Optional[float] = Field(None, ge=0, le=100)
 
@@ -117,7 +117,7 @@ class ServicePolicies(BaseModel):
     no_show_penalty: Optional[float] = Field(None, ge=0)
 
 class BusinessService(BaseModel):
-    id: str = Field(..., min_length=1, max_length=100, regex=r'^[a-z0-9_]+$')
+    id: str = Field(..., min_length=1, max_length=100, pattern=r'^[a-z0-9_]+$')
     name: str = Field(..., min_length=1, max_length=255)
     description: str = Field(..., min_length=1, max_length=1000)
     category: str = Field(..., min_length=1, max_length=100)
@@ -141,19 +141,19 @@ class BusinessService(BaseModel):
         return v
 
 class MCPIntegration(BaseModel):
-    endpoint: str = Field(..., regex=r'^https?://.+/mcp$')
-    transport: str = Field(default="http", regex=r'^(http|websocket)$')
+    endpoint: str = Field(..., pattern=r'^https?://.+/mcp$')
+    transport: str = Field(default="http", pattern=r'^(http|websocket)$')
     authentication: str = Field(default="oauth2")
     version: str = Field(default="2025-06-18")
 
 class A2AIntegration(BaseModel):
-    discovery_url: str = Field(..., regex=r'^https?://.+/.well-known/agent.json$')
+    discovery_url: str = Field(..., pattern=r'^https?://.+/.well-known/agent.json$')
     capabilities: List[str] = Field(default_factory=lambda: ["task_execution", "context_sharing"])
     max_concurrent_sessions: int = Field(default=10, ge=1, le=100)
 
 class WebhookConfig(BaseModel):
     events: List[str] = Field(..., min_items=1)
-    endpoint: str = Field(..., regex=r'^https?://.+/webhooks/bais$')
+    endpoint: str = Field(..., pattern=r'^https?://.+/webhooks/bais$')
     signing_secret: Optional[str] = Field(None, min_length=32)
     retry_attempts: int = Field(default=3, ge=0, le=10)
 
@@ -163,8 +163,8 @@ class IntegrationConfig(BaseModel):
     webhooks: WebhookConfig
 
 class BAISBusinessSchema(BaseModel):
-    bais_version: str = Field(default="1.0", regex=r'^\d+\.\d+$')
-    schema_version: str = Field(default="1.0.0", regex=r'^\d+\.\d+\.\d+$')
+    bais_version: str = Field(default="1.0", pattern=r'^\d+\.\d+$')
+    schema_version: str = Field(default="1.0.0", pattern=r'^\d+\.\d+\.\d+$')
     business_info: BusinessInfo
     services: List[BusinessService] = Field(..., min_items=1, max_items=50)
     integration: IntegrationConfig
