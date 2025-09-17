@@ -1,0 +1,118 @@
+groups:
+  - name: bais_ap2_alerts
+    rules:
+      # High-level service availability
+      - alert: BAIS_Backend_Down
+        expr: up{job="bais-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: bais-backend
+        annotations:
+          summary: "BAIS Backend is down"
+          description: "BAIS Backend has been down for more than 1 minute"
+
+      - alert: AP2_Webhook_Processor_Down
+        expr: up{job="ap2-webhook-processor"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: ap2-webhook
+        annotations:
+          summary: "AP2 Webhook Processor is down"
+          description: "AP2 Webhook Processor has been down for more than 2 minutes"
+
+      # Payment-specific alerts
+      - alert: High_Payment_Failure_Rate
+        expr: |
+          (
+            rate(bais_payment_workflows_failed_total[5m]) /
+            rate(bais_payment_workflows_initiated_total[5m])
+          ) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: ap2-payments
+        annotations:
+          summary: "High payment failure rate detected"
+          description: "Payment failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: Payment_Processing_Slow
+        expr: histogram_quantile(0.95, rate(bais_payment_workflow_duration_seconds_bucket[5m])) > 30
+        for: 3m
+        labels:
+          severity: warning
+          service: ap2-payments
+        annotations:
+          summary: "Payment processing is slow"
+          description: "95th percentile payment processing time is {{ $value }}s"
+
+      - alert: Webhook_Processing_Backlog
+        expr: bais_ap2_webhook_queue_size > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: ap2-webhook
+        annotations:
+          summary: "AP2 webhook processing backlog"
+          description: "Webhook queue has {{ $value }} pending items"
+
+      # Database alerts
+      - alert: High_Database_Connections
+        expr: pg_stat_database_numbackends{datname="bais_production"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: database
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} active connections"
+
+      - alert: Database_Connection_Failed
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Database connection failed"
+          description: "Cannot connect to PostgreSQL database"
+
+      # Business-critical alerts
+      - alert: No_Successful_Payments_Recently
+        expr: |
+          absent(
+            increase(bais_payment_workflows_completed_total[10m])
+          ) and on() (
+            increase(bais_payment_workflows_initiated_total[10m]) > 0
+          )
+        for: 10m
+        labels:
+          severity: critical
+          service: ap2-payments
+        annotations:
+          summary: "No successful payments in the last 10 minutes"
+          description: "Payment workflows are being initiated but none are completing successfully"
+
+      # Security alerts
+      - alert: High_Authentication_Failure_Rate
+        expr: |
+          rate(bais_auth_failures_total[5m]) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "High authentication failure rate"
+          description: "{{ $value }} authentication failures per second over the last 5 minutes"
+
+      - alert: Suspicious_Webhook_Activity
+        expr: |
+          rate(bais_ap2_webhook_signature_failures_total[5m]) > 0.5
+        for: 1m
+        labels:
+          severity: warning
+          service: security
+        annotations:
+          summary: "Suspicious webhook signature failures"
+          description: "Multiple webhook signature validation failures detected"
