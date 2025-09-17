@@ -12,6 +12,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import httpx
 from pydantic import BaseModel
 import uuid
+from .payments.payment_coordinator import PaymentCoordinator, PaymentCoordinationRequest
+from .payments.models import PaymentStatus, PaymentMethodType
 
 # MCP Protocol Models (based on 2025-06-18 spec)
 class MCPResource(BaseModel):
