@@ -8,6 +8,7 @@ from typing import Optional, List
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from .ap2_settings import AP2Settings
 
 
 class DatabaseSettings(BaseSettings):
@@ -120,6 +121,7 @@ class Settings(BaseSettings):
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     bais: BAISSettings = Field(default_factory=BAISSettings)
     oauth: OAuthSettings = Field(default_factory=OAuthSettings)
+    ap2: AP2Settings = Field(default_factory=AP2Settings)
     
     # Application metadata
     app_name: str = Field(default="BAIS Production Server", description="Application name")

@@ -58,6 +58,14 @@ class Business(Base):
     a2a_endpoint = Column(String(255), nullable=False)
     webhook_endpoint = Column(String(255))
     
+    # AP2 Payment Protocol configuration
+    ap2_enabled = Column(Boolean, default=False, index=True)
+    ap2_client_id = Column(String(255))
+    ap2_public_key = Column(Text)  # PEM format public key
+    ap2_supported_payment_methods = Column(JSONB, default=list)  # List of supported payment method types
+    ap2_webhook_endpoint = Column(String(255))
+    ap2_verification_required = Column(Boolean, default=True)
+    
     # Status and metadata
     status = Column(String(20), default="active", index=True)
     compliance_flags = Column(JSONB, default=dict)
@@ -277,6 +285,14 @@ class Booking(Base):
     currency = Column(String(3), default="USD")
     payment_status = Column(String(20), default="pending", index=True)
     payment_data = Column(JSONB)
+    
+    # AP2 Payment Protocol fields
+    ap2_intent_mandate_id = Column(String(255), index=True)
+    ap2_cart_mandate_id = Column(String(255), index=True)
+    ap2_transaction_id = Column(String(255), index=True)
+    ap2_payment_workflow_id = Column(String(255), index=True)
+    ap2_payment_method_id = Column(String(255))
+    ap2_verification_status = Column(String(20), default="pending")
     
     # Booking lifecycle
     status = Column(String(20), default="confirmed", nullable=False, index=True)

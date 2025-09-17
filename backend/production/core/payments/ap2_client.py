@@ -136,6 +136,47 @@ class AP2Client:
             password=None
         )
     
+    async def get_mandate(self, mandate_id: str) -> Optional[AP2Mandate]:
+        """Retrieve a mandate by ID from AP2 network"""
+        try:
+            response = await self._http_client.get(
+                f"{self._config.base_url}/mandates/{mandate_id}",
+                headers=self._get_auth_headers()
+            )
+            response.raise_for_status()
+            return AP2Mandate.from_dict(response.json())
+        except httpx.HTTPStatusError:
+            return None
+    
+    async def revoke_mandate(self, mandate_id: str, reason: str = "user_requested") -> bool:
+        """Revoke an active mandate"""
+        try:
+            response = await self._http_client.post(
+                f"{self._config.base_url}/mandates/{mandate_id}/revoke",
+                json={"reason": reason},
+                headers=self._get_auth_headers()
+            )
+            response.raise_for_status()
+            return True
+        except httpx.HTTPStatusError:
+            return False
+    
+    async def get_transaction_status(self, transaction_id: str) -> Optional[AP2Transaction]:
+        """Get transaction status from AP2 network"""
+        try:
+            response = await self._http_client.get(
+                f"{self._config.base_url}/transactions/{transaction_id}",
+                headers=self._get_auth_headers()
+            )
+            response.raise_for_status()
+            return AP2Transaction.from_dict(response.json())
+        except httpx.HTTPStatusError:
+            return None
+    
+    async def close(self):
+        """Close the HTTP client"""
+        await self._http_client.aclose()
+    
     def _get_auth_headers(self) -> Dict[str, str]:
         """Get authentication headers for AP2 requests"""
         return {

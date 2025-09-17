@@ -240,6 +240,55 @@ class BAISMCPServer:
                             "required": [name for name, param in service.parameters.items() if param.required] + ["customer_info"]
                         }
                     ))
+                    
+                    # AP2 Payment-enabled booking tool
+                    tools.append(MCPTool(
+                        name=f"book_with_ap2_payment_{service.id}",
+                        description=f"Create a booking for {service.name} with AP2 payment integration",
+                        inputSchema={
+                            "type": "object",
+                            "properties": {
+                                **{
+                                    param_name: {
+                                        "type": param.type,
+                                        "description": param.description,
+                                        **({"enum": param.enum} if param.enum else {}),
+                                        **({"minimum": param.minimum} if param.minimum is not None else {}),
+                                        **({"maximum": param.maximum} if param.maximum is not None else {})
+                                    }
+                                    for param_name, param in service.parameters.items()
+                                },
+                                "customer_info": {
+                                    "type": "object",
+                                    "properties": {
+                                        "name": {"type": "string", "description": "Customer full name"},
+                                        "email": {"type": "string", "description": "Customer email"},
+                                        "phone": {"type": "string", "description": "Customer phone number"}
+                                    },
+                                    "required": ["name", "email"]
+                                },
+                                "ap2_payment": {
+                                    "type": "object",
+                                    "properties": {
+                                        "user_id": {"type": "string", "description": "User ID for AP2 mandate"},
+                                        "agent_id": {"type": "string", "description": "Agent ID handling the payment"},
+                                        "payment_method_id": {"type": "string", "description": "Payment method ID"},
+                                        "intent_description": {"type": "string", "description": "Description of payment intent"},
+                                        "constraints": {
+                                            "type": "object",
+                                            "properties": {
+                                                "max_amount": {"type": "number", "description": "Maximum payment amount"},
+                                                "payment_methods": {"type": "array", "items": {"type": "string"}, "description": "Allowed payment methods"},
+                                                "expiry_time": {"type": "string", "description": "Mandate expiry time"}
+                                            }
+                                        }
+                                    },
+                                    "required": ["user_id", "agent_id", "payment_method_id"]
+                                }
+                            },
+                            "required": [name for name, param in service.parameters.items() if param.required] + ["customer_info", "ap2_payment"]
+                        }
+                    ))
             
             return {"tools": tools}
         
@@ -268,6 +317,14 @@ class BAISMCPServer:
                     result = await self.business_adapter.search_availability(service_id, request.arguments)
                 elif action == "book":
                     result = await self.business_adapter.create_booking(service_id, request.arguments)
+                elif action == "book-with-ap2-payment":
+                    # Extract AP2 payment data from arguments
+                    ap2_payment_data = request.arguments.pop("ap2_payment", {})
+                    result = await self.business_adapter.create_booking_with_ap2_payment(
+                        service_id, 
+                        request.arguments, 
+                        ap2_payment_data
+                    )
                 else:
                     raise ValueError(f"Unknown action: {action}")
                 
@@ -393,6 +450,83 @@ class BusinessSystemAdapter:
             "total_amount": 159.00,
             "currency": "USD"
         }
+    
+    async def create_booking_with_ap2_payment(
+        self, 
+        service_id: str, 
+        booking_params: Dict[str, Any],
+        ap2_payment_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Create a booking with AP2 payment integration"""
+        try:
+            # Import AP2 components
+            from .payments.payment_coordinator import PaymentCoordinator, PaymentCoordinationRequest
+            from .payments.ap2_client import AP2Client, AP2ClientConfig
+            from ..config.ap2_settings import get_ap2_client_config, is_ap2_enabled
+            
+            if not is_ap2_enabled():
+                # Fallback to regular booking without AP2
+                return await self.create_booking(service_id, booking_params)
+            
+            # Create AP2 client and coordinator
+            config = AP2ClientConfig(**get_ap2_client_config())
+            ap2_client = AP2Client(config)
+            
+            # TODO: Inject proper business repository
+            from .business_query_repository import BusinessQueryRepository
+            business_repo = BusinessQueryRepository()
+            coordinator = PaymentCoordinator(ap2_client, business_repo)
+            
+            # Extract AP2 payment information
+            user_id = ap2_payment_data.get("user_id")
+            agent_id = ap2_payment_data.get("agent_id")
+            intent_description = ap2_payment_data.get("intent_description", f"Booking for service {service_id}")
+            payment_method_id = ap2_payment_data.get("payment_method_id")
+            payment_constraints = ap2_payment_data.get("constraints", {})
+            
+            # Create cart items from booking parameters
+            cart_items = [{
+                "service_id": service_id,
+                "name": booking_params.get("service_name", f"Service {service_id}"),
+                "price": booking_params.get("total_amount", 159.00),
+                "quantity": 1,
+                "currency": booking_params.get("currency", "USD"),
+                "booking_params": booking_params
+            }]
+            
+            # Create payment coordination request
+            payment_request = PaymentCoordinationRequest(
+                user_id=user_id,
+                business_id=ap2_payment_data.get("business_id"),
+                agent_id=agent_id,
+                intent_description=intent_description,
+                cart_items=cart_items,
+                payment_constraints=payment_constraints,
+                payment_method_id=payment_method_id
+            )
+            
+            # Execute AP2 payment workflow
+            workflow = await coordinator.initiate_payment_workflow(payment_request)
+            
+            # Create the actual booking
+            booking_result = await self.create_booking(service_id, booking_params)
+            
+            # Add AP2 information to booking result
+            booking_result.update({
+                "ap2_payment_workflow_id": workflow.id,
+                "ap2_intent_mandate_id": workflow.intent_mandate_id,
+                "ap2_cart_mandate_id": workflow.cart_mandate_id,
+                "ap2_transaction_id": workflow.transaction_id,
+                "ap2_payment_status": workflow.status.value,
+                "ap2_payment_method_id": payment_method_id
+            })
+            
+            return booking_result
+            
+        except Exception as e:
+            # Log error and fallback to regular booking
+            print(f"AP2 payment failed, falling back to regular booking: {e}")
+            return await self.create_booking(service_id, booking_params)
 
 # MCP Server Factory
 class BAISMCPServerFactory:

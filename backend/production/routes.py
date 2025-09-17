@@ -8,6 +8,8 @@ from .core.database_models import DatabaseManager
 from .core.mcp_server_generator import BusinessSystemAdapter
 from .config.settings import get_settings, get_database_url
 from .core.exceptions import ConfigurationError
+from .api.v1.payments.mandate_router import router as mandate_router
+from .api.v1.payments.transaction_router import router as transaction_router
 
 
 class DependencyContainer:
@@ -78,6 +80,10 @@ def get_agent_service(
 
 # Router Setup
 api_router = APIRouter()
+
+# Include AP2 payment routers
+api_router.include_router(mandate_router, prefix="/payments")
+api_router.include_router(transaction_router, prefix="/payments")
 
 @api_router.post("/businesses", response_model=BusinessRegistrationResponse, tags=["Business Management"])
 async def register_business(
