@@ -1,0 +1,125 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "BAIS AP2 Payment Integration",
+    "tags": ["bais", "ap2", "payments"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Payment Workflow Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(rate(bais_payment_workflows_initiated_total[5m]))",
+            "legendFormat": "Initiated/min"
+          },
+          {
+            "expr": "sum(rate(bais_payment_workflows_completed_total[5m]))",
+            "legendFormat": "Completed/min"
+          },
+          {
+            "expr": "sum(rate(bais_payment_workflows_failed_total[5m]))",
+            "legendFormat": "Failed/min"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "min": 0
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Payment Success Rate",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "(sum(rate(bais_payment_workflows_completed_total[5m])) / sum(rate(bais_payment_workflows_initiated_total[5m]))) * 100",
+            "legendFormat": "Success Rate"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": 0},
+                {"color": "yellow", "value": 90},
+                {"color": "green", "value": 95}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Payment Processing Duration",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum(rate(bais_payment_workflow_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, sum(rate(bais_payment_workflow_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum(rate(bais_payment_workflow_duration_seconds_bucket[5m])) by (le))",
+            "legendFormat": "p99"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Duration (seconds)",
+            "min": 0
+          }
+        ],
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+      },
+      {
+        "id": 4,
+        "title": "AP2 Webhook Processing",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(bais_ap2_webhooks_received_total[5m]))",
+            "legendFormat": "Received"
+          },
+          {
+            "expr": "sum(rate(bais_ap2_webhooks_processed_total[5m]))",
+            "legendFormat": "Processed"
+          },
+          {
+            "expr": "sum(rate(bais_ap2_webhooks_failed_total[5m]))",
+            "legendFormat": "Failed"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+      },
+      {
+        "id": 5,
+        "title": "Business Metrics",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "sum by (business_id) (rate(bais_payment_workflows_completed_total[5m]))",
+            "format": "table"
+          }
+        ],
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16}
+      }
+    ]
+  }
+}
