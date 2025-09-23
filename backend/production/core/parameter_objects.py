@@ -1,5 +1,4 @@
 """
-Parameter Objects for Clean Code Compliance
 Replaces functions with many parameters with structured data objects
 """
 

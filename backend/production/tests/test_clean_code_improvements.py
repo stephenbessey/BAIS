@@ -1,6 +1,6 @@
 """
-Clean Code Improvements Test Suite
-Tests the core clean code improvements without heavy dependencies
+Code Improvements Test Suite
+Tests the core code improvements without heavy dependencies
 """
 
 import pytest
@@ -10,7 +10,7 @@ from uuid import uuid4
 
 
 class TestParameterObjects:
-    """Test suite for parameter objects clean code improvement"""
+    """Test suite for parameter objects code improvement"""
     
     def test_business_search_criteria_defaults(self):
         """Test that BusinessSearchCriteria uses constants for defaults"""
@@ -46,7 +46,7 @@ class TestParameterObjects:
 
 
 class TestConstants:
-    """Test suite for constants clean code improvement"""
+    """Test suite for constants code improvement"""
     
     def test_database_limits_constants(self):
         """Test that database limits are properly defined"""
@@ -80,7 +80,7 @@ class TestConstants:
 
 
 class TestExceptionHierarchy:
-    """Test suite for exception hierarchy clean code improvement"""
+    """Test suite for exception hierarchy code improvement"""
     
     def test_bais_exception_base(self):
         """Test base BAIS exception"""
@@ -122,7 +122,7 @@ class TestExceptionHierarchy:
 
 
 class TestConfigurationManagement:
-    """Test suite for configuration management clean code improvement"""
+    """Test suite for configuration management code improvement"""
     
     def test_database_settings_defaults(self):
         """Test database settings with defaults"""
@@ -171,7 +171,7 @@ class TestConfigurationManagement:
 
 
 class TestSchemaValidatorImprovements:
-    """Test suite for schema validator clean code improvements"""
+    """Test suite for schema validator code improvements"""
     
     def test_validation_methods_exist(self):
         """Test that validation methods are properly extracted"""
