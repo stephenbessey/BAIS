@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import serialization
 
 from .models import AP2Mandate, AP2Transaction, PaymentMethod, VerifiableCredential
 from .ap2_mandate_validator import AP2MandateValidator, AP2MandateValidationError
+from .cryptographic_mandate_validator import get_mandate_validator, CryptographicMandateValidator
 from ..connection_pool_manager import (
     get_connection_pool_manager, 
     AP2_POOL_CONFIG,
@@ -36,6 +37,9 @@ class AP2Client:
         self._config = config
         self._private_key = self._load_private_key(config.private_key)
         self._mandate_validator = AP2MandateValidator(config.public_key)
+        
+        # Initialize cryptographic mandate validator
+        self._crypto_validator = get_mandate_validator()
         
         # Initialize connection pool manager
         self._pool_manager = get_connection_pool_manager()
@@ -68,10 +72,10 @@ class AP2Client:
             "expiresAt": (datetime.utcnow() + timedelta(hours=24)).isoformat()
         }
         
-        # Sign the mandate
-        signed_mandate = self._sign_mandate(mandate_data)
+        # Create cryptographically signed mandate
+        signed_mandate = self._crypto_validator.create_signed_mandate(mandate_data)
         
-        # Submit to AP2 network
+        # Submit signed mandate to AP2 network
         response = await self._http_client.post(
             f"{self._config.base_url}/mandates/intent",
             json=signed_mandate,
@@ -98,7 +102,8 @@ class AP2Client:
             "timestamp": datetime.utcnow().isoformat()
         }
         
-        signed_mandate = self._sign_mandate(mandate_data)
+        # Create cryptographically signed mandate
+        signed_mandate = self._crypto_validator.create_signed_mandate(mandate_data)
         
         response = await self._http_client.post(
             f"{self._config.base_url}/mandates/cart",
@@ -165,11 +170,14 @@ class AP2Client:
             response.raise_for_status()
             mandate = AP2Mandate.from_dict(response.json())
             
-            # CRITICAL SECURITY: Validate mandate signature
-            if not self._mandate_validator.verify_mandate(mandate):
+            # CRITICAL SECURITY: Validate mandate signature using cryptographic validator
+            mandate_data = response.json()
+            if not self._crypto_validator.verify_signed_mandate(mandate_data):
                 raise AP2MandateValidationError(f"Invalid signature for mandate {mandate_id}")
             
-            return mandate
+            # Extract mandate from signed mandate structure
+            mandate_dict = mandate_data.get("mandate", mandate_data)
+            return AP2Mandate.from_dict(mandate_dict)
         except httpx.HTTPStatusError:
             return None
         except AP2MandateValidationError:

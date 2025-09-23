@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from ...core.a2a_integration import A2AAgentCard, A2AAgent, A2AServer, A2ACapability, A2ADiscoveryRequest, A2ADiscoveryResponse
@@ -9,6 +9,7 @@ from ...core.a2a_registry_network import (
     RegistryNetworkType,
     get_registry_network_client
 )
+from ...core.a2a_agent_card_generator import A2AAgentCardGenerator, A2ACapabilityRegistry
 from ...core.distributed_tracing import A2ATracer
 
 
@@ -108,9 +109,61 @@ def _build_agent_card() -> A2AAgentCard:
 	)
 
 
+# Global agent card generator
+_agent_card_generator: Optional[A2AAgentCardGenerator] = None
+
+
+def get_agent_card_generator() -> A2AAgentCardGenerator:
+    """Get the global agent card generator"""
+    global _agent_card_generator
+    if _agent_card_generator is None:
+        _agent_card_generator = A2AAgentCardGenerator()
+    return _agent_card_generator
+
+
 @router.get("/.well-known/agent.json", response_model=A2AAgentCard)
-async def get_agent_card() -> A2AAgentCard:
-	return _build_agent_card()
+async def get_agent_card(
+    agent_generator: A2AAgentCardGenerator = Depends(get_agent_card_generator)
+) -> A2AAgentCard:
+    """
+    A2A Agent Discovery Endpoint
+    
+    Returns the agent card for this BAIS instance following A2A specification.
+    This endpoint is used by other agents to discover capabilities and endpoints.
+    """
+    try:
+        # Create a sample business schema for demonstration
+        # In a real implementation, this would come from the current business context
+        from ...core.bais_schema_validator import BAISSchemaValidator
+        
+        # Create a sample hospitality business schema
+        business_schema = BAISSchemaValidator.create_hospitality_template()
+        business_schema.business_info.name = "Sample Hotel"
+        business_schema.business_info.id = "hotel_123"
+        
+        # Generate agent card
+        server_endpoint = "https://api.example.com/a2a/v1"
+        agent_card = agent_generator.generate_agent_card(
+            business_schema=business_schema,
+            server_endpoint=server_endpoint,
+            agent_id="bais_hotel_agent"
+        )
+        
+        # Validate agent card
+        validation_issues = agent_generator.validate_agent_card(agent_card)
+        if validation_issues:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Agent card validation failed: {'; '.join(validation_issues)}"
+            )
+        
+        return agent_card
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate agent card: {str(e)}"
+        )
 
 
 class EnhancedDiscoveryRequest(BaseModel):

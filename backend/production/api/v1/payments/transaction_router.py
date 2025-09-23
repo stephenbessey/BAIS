@@ -76,9 +76,12 @@ def get_payment_coordinator() -> PaymentCoordinator:
     
     # Initialize business repository for payment coordination
     from ...core.business_query_repository import BusinessQueryRepository
-    business_repo = BusinessQueryRepository()
+    from ...core.workflow_state_manager import WorkflowStateManagerFactory
     
-    return PaymentCoordinator(ap2_client, business_repo)
+    business_repo = BusinessQueryRepository()
+    workflow_state_manager = WorkflowStateManagerFactory.create_in_memory_manager()
+    
+    return PaymentCoordinator(ap2_client, business_repo, workflow_state_manager)
 
 
 @router.post("/workflows", response_model=PaymentWorkflowResponse, status_code=status.HTTP_201_CREATED)
