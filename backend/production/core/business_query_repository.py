@@ -128,3 +128,79 @@ class BusinessQueryRepository:
         return self.db_session.query(Business).join(BusinessService).filter(
             BusinessService.category == category
         ).distinct().all()
+    
+    def find_businesses_with_a2a_capabilities(self, capabilities: List[str]) -> List[Business]:
+        """
+        Find businesses with specific A2A capabilities
+        
+        Args:
+            capabilities: List of A2A capabilities to search for
+            
+        Returns:
+            List of businesses with matching capabilities
+        """
+        # This would implement actual A2A capability search
+        # For now, return businesses that have A2A integration enabled
+        return self.db_session.query(Business).filter(
+            Business.a2a_enabled == True
+        ).all()
+    
+    def find_businesses_with_ap2_integration(self) -> List[Business]:
+        """Find businesses with AP2 payment integration enabled"""
+        return self.db_session.query(Business).filter(
+            Business.ap2_enabled == True
+        ).all()
+    
+    def get_business_metrics(self, business_id: UUID) -> Optional[dict]:
+        """Get business metrics and statistics"""
+        business = self.find_by_id(business_id)
+        if not business:
+            return None
+        
+        # Get service count
+        service_count = len(self.get_business_services(business_id))
+        
+        # Get API key count
+        api_keys = self.get_business_api_keys(business_id)
+        
+        return {
+            'service_count': service_count,
+            'active_api_keys': len(api_keys),
+            'created_at': business.created_at,
+            'last_updated': business.updated_at,
+            'status': business.status
+        }
+    
+    def search_businesses_by_name(self, name_query: str, limit: int = 50) -> List[Business]:
+        """Search businesses by name"""
+        return self.db_session.query(Business).filter(
+            Business.name.ilike(f"%{name_query}%")
+        ).limit(limit).all()
+    
+    def get_recently_registered_businesses(self, days: int = 7, limit: int = 20) -> List[Business]:
+        """Get recently registered businesses"""
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        
+        return self.db_session.query(Business).filter(
+            Business.created_at >= cutoff_date
+        ).order_by(Business.created_at.desc()).limit(limit).all()
+    
+    def find_businesses_by_integration_type(self, integration_type: str) -> List[Business]:
+        """Find businesses by integration type"""
+        # This would search based on integration configuration
+        # For now, return businesses with specific integration flags
+        if integration_type == "mcp":
+            return self.db_session.query(Business).filter(
+                Business.mcp_enabled == True
+            ).all()
+        elif integration_type == "a2a":
+            return self.db_session.query(Business).filter(
+                Business.a2a_enabled == True
+            ).all()
+        elif integration_type == "ap2":
+            return self.db_session.query(Business).filter(
+                Business.ap2_enabled == True
+            ).all()
+        else:
+            return []
