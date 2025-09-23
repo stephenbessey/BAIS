@@ -472,7 +472,7 @@ class BusinessSystemAdapter:
             config = AP2ClientConfig(**get_ap2_client_config())
             ap2_client = AP2Client(config)
             
-            # TODO: Inject proper business repository
+            # Initialize business repository for payment coordination
             from .business_query_repository import BusinessQueryRepository
             business_repo = BusinessQueryRepository()
             coordinator = PaymentCoordinator(ap2_client, business_repo)

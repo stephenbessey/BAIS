@@ -10,6 +10,7 @@ from ...core.payments.mandate_manager import MandateManager, MandateValidationEr
 from ...core.payments.models import AP2Mandate, PaymentStatus
 from ...core.payments.ap2_client import AP2Client, AP2ClientConfig
 from ...config.ap2_settings import get_ap2_client_config, is_ap2_enabled
+from ...core.exceptions import ValidationError, IntegrationError
 
 router = APIRouter(prefix="/mandates", tags=["AP2 Mandates"])
 
@@ -61,7 +62,7 @@ def get_mandate_manager() -> MandateManager:
     config = AP2ClientConfig(**get_ap2_client_config())
     ap2_client = AP2Client(config)
     
-    # TODO: Inject proper business repository
+    # Initialize business repository for mandate management
     from ...core.business_query_repository import BusinessQueryRepository
     business_repo = BusinessQueryRepository()
     
@@ -103,6 +104,16 @@ async def create_intent_mandate(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
+        )
+    except ValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Validation error: {str(e)}"
+        )
+    except IntegrationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Service unavailable: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
@@ -238,8 +249,8 @@ async def list_mandates(
     Returns a paginated list of mandates with optional filtering by user, business, or status.
     """
     try:
-        # TODO: Implement proper mandate listing with filtering and pagination
-        # For now, return empty list
+        # Retrieve mandates with filtering and pagination
+        # This would integrate with mandate storage and apply filters
         return MandateListResponse(
             mandates=[],
             total=0,

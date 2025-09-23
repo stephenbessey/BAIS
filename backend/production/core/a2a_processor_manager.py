@@ -90,8 +90,10 @@ class A2AProcessorManager:
             if self.ap2_config:
                 ap2_client = AP2Client(self.ap2_config)
             
-            # Create payment coordinator
-            coordinator = PaymentCoordinator(ap2_client, None)  # TODO: Inject business repository
+            # Create payment coordinator with proper dependency injection
+            from ..core.business_query_repository import BusinessQueryRepository
+            business_repository = BusinessQueryRepository()
+            coordinator = PaymentCoordinator(ap2_client, business_repository)
             
             # Create processor
             processor = A2ATaskProcessor(adapter, coordinator)

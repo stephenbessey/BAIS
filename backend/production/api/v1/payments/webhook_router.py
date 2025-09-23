@@ -19,6 +19,10 @@ from ...core.payments.payment_coordinator import PaymentCoordinator
 from ...core.payments.ap2_client import AP2Client
 from ...core.protocol_configurations import AP2_CONFIG, AP2EventType
 from ...monitoring.metrics import track_webhook_processing
+from ...core.exceptions import ValidationError, IntegrationError
+from ...core.secure_logging import get_webhook_logger, log_webhook_event, LogContext
+
+logger = get_webhook_logger()
 
 router = APIRouter(prefix="/webhooks", tags=["AP2 Webhooks"])
 
@@ -237,20 +241,35 @@ async def _handle_payment_completion(webhook_data: PaymentWebhookData, coordinat
     try:
         # Update payment status in coordinator
         # This would integrate with the actual payment coordinator logic
-        print(f"Payment completed: {webhook_data.payment_id}, Amount: {webhook_data.amount} {webhook_data.currency}")
+        context = LogContext(
+            workflow_id=webhook_data.payment_id,
+            business_id=webhook_data.business_id
+        )
+        log_webhook_event("payment_completed", webhook_data.payment_id, 
+                         webhook_data.business_id, amount=webhook_data.amount, 
+                         currency=webhook_data.currency)
         
         # Notify business system of payment completion
         await coordinator.handle_payment_completion(webhook_data)
         
-    except Exception as e:
-        print(f"Error handling payment completion: {e}")
+    except ValidationError as e:
+        logger.error(f"Validation error in payment completion webhook: {e}")
         raise
+    except IntegrationError as e:
+        logger.error(f"Integration error in payment completion webhook: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in payment completion webhook: {e}")
+        from ...core.exceptions import BAISException
+        raise BAISException(f"Payment completion webhook failed: {str(e)}")
 
 
 async def _handle_payment_failure(webhook_data: PaymentWebhookData, coordinator: PaymentCoordinator) -> None:
     """Handle payment failure webhook"""
     try:
-        print(f"Payment failed: {webhook_data.payment_id}, Reason: {webhook_data.metadata.get('failure_reason', 'Unknown')}")
+        log_webhook_event("payment_failed", webhook_data.payment_id, 
+                         webhook_data.business_id, 
+                         failure_reason=webhook_data.metadata.get('failure_reason', 'Unknown'))
         
         # Notify business system of payment failure
         await coordinator.handle_payment_failure(webhook_data)

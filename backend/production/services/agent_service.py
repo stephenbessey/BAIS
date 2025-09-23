@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from ..api_models import AgentInteractionRequest, AgentInteractionResponse
 from ..core.mcp_server_generator import BusinessSystemAdapter
+from ..core.exceptions import ValidationError, IntegrationError
 
 
 class InteractionType(Enum):
@@ -50,8 +51,15 @@ class AgentService:
         try:
             result = await self._process_interaction(request)
             return self._build_success_response(result, start_time)
-        except Exception as e:
+        except ValidationError as e:
             return self._build_error_response(e, start_time)
+        except IntegrationError as e:
+            return self._build_error_response(e, start_time)
+        except Exception as e:
+            # Fallback for unexpected errors
+            from ..core.exceptions import BAISException
+            error = BAISException(f"Unexpected error in agent interaction: {str(e)}")
+            return self._build_error_response(error, start_time)
     
     async def _process_interaction(self, request: AgentInteractionRequest) -> InteractionResult:
         """Process the interaction request"""
@@ -97,8 +105,8 @@ class AgentService:
     
     async def _handle_information_request(self, request: AgentInteractionRequest) -> Dict[str, Any]:
         """Handle information requests"""
-        # TODO: Implement proper information retrieval from business schema
-        return {"info": "Business information placeholder"}
+        # Retrieve business information from schema
+        return await self.business_adapter.get_business_info(request.parameters.get("business_id"))
     
     def _extract_service_id(self, request: AgentInteractionRequest) -> str:
         """Extract service ID from request parameters"""

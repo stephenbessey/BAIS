@@ -6,6 +6,8 @@ from enum import Enum
 from .ap2_client import AP2Client
 from .models import PaymentWorkflow, PaymentStatus, BusinessIntent
 from ..business_query_repository import BusinessQueryRepository
+from ..exceptions import ValidationError, IntegrationError
+from ..workflow_event_bus import publish_workflow_event, WorkflowEventType
 
 
 class PaymentWorkflowStep(Enum):
@@ -72,10 +74,45 @@ class PaymentCoordinator:
             
             workflow.status = PaymentStatus.COMPLETED
             
+            # Publish payment completion event
+            await publish_workflow_event(
+                event_type=WorkflowEventType.PAYMENT_COMPLETED,
+                workflow_id=workflow.id,
+                business_id=request.business_id,
+                user_id=request.user_id,
+                data={
+                    "amount": total_amount,
+                    "currency": request.currency or "USD",
+                    "payment_method": request.payment_method_id
+                }
+            )
+            
+        except ValidationError as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = f"Validation error: {str(e)}"
+            raise
+        except IntegrationError as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = f"Integration error: {str(e)}"
+            raise
         except Exception as e:
             workflow.status = PaymentStatus.FAILED
-            workflow.error_message = str(e)
-            raise
+            workflow.error_message = f"Unexpected error: {str(e)}"
+            
+            # Publish payment failure event
+            await publish_workflow_event(
+                event_type=WorkflowEventType.PAYMENT_FAILED,
+                workflow_id=workflow.id,
+                business_id=request.business_id,
+                user_id=request.user_id,
+                data={
+                    "error_message": str(e),
+                    "error_type": type(e).__name__
+                }
+            )
+            
+            from ..exceptions import BAISException
+            raise BAISException(f"Payment workflow failed: {str(e)}")
         
         return workflow
     
@@ -112,7 +149,7 @@ class PaymentCoordinator:
             intent_mandate_id=workflow.intent_mandate_id,
             cart_items=request.cart_items,
             total_amount=total_amount,
-            currency="USD"  # TODO: Make configurable
+            currency=request.currency or "USD"
         )
         
         workflow.cart_mandate_id = cart_mandate.id

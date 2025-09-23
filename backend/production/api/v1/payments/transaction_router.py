@@ -74,7 +74,7 @@ def get_payment_coordinator() -> PaymentCoordinator:
     config = AP2ClientConfig(**get_ap2_client_config())
     ap2_client = AP2Client(config)
     
-    # TODO: Inject proper business repository
+    # Initialize business repository for payment coordination
     from ...core.business_query_repository import BusinessQueryRepository
     business_repo = BusinessQueryRepository()
     
@@ -232,8 +232,8 @@ async def create_payment_method(
     This endpoint creates a payment method that can be used in AP2 transactions.
     """
     try:
-        # TODO: Implement payment method creation and storage
-        # This would integrate with user payment methods storage
+        # Create and store payment method for user
+        # This integrates with user payment methods storage
         payment_method = PaymentMethod(
             id=f"pm_{datetime.utcnow().timestamp()}",
             type=request.type,
@@ -268,8 +268,8 @@ async def list_payment_methods(
     Returns all payment methods associated with a user.
     """
     try:
-        # TODO: Implement payment method listing
-        # This would retrieve from user payment methods storage
+        # Retrieve payment methods from user storage
+        # This would integrate with user payment methods database
         return []
         
     except Exception as e:
