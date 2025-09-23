@@ -1,7 +1,15 @@
-from fastapi import APIRouter
-from typing import Any, Dict
+from fastapi import APIRouter, HTTPException, Depends
+from typing import Any, Dict, List
+from pydantic import BaseModel
 
-from ...core.a2a_integration import A2AAgentCard, A2AAgent, A2AServer, A2ACapability
+from ...core.a2a_integration import A2AAgentCard, A2AAgent, A2AServer, A2ACapability, A2ADiscoveryRequest, A2ADiscoveryResponse
+from ...core.a2a_registry_network import (
+    A2ARegistryNetworkClient, 
+    AgentDiscoveryCriteria, 
+    RegistryNetworkType,
+    get_registry_network_client
+)
+from ...core.distributed_tracing import A2ATracer
 
 
 router = APIRouter()
@@ -103,3 +111,129 @@ def _build_agent_card() -> A2AAgentCard:
 @router.get("/.well-known/agent.json", response_model=A2AAgentCard)
 async def get_agent_card() -> A2AAgentCard:
 	return _build_agent_card()
+
+
+class EnhancedDiscoveryRequest(BaseModel):
+    """Enhanced discovery request with network and reputation filtering"""
+    capabilities_needed: List[str] = []
+    agent_type: str = None
+    location: str = None
+    business_category: str = None
+    min_reputation_score: float = 0.0
+    max_response_time_ms: int = 5000
+    preferred_networks: List[str] = []  # "public", "private", "consortium"
+    exclude_networks: List[str] = []
+    max_results: int = 50
+
+
+@router.post("/discover", response_model=A2ADiscoveryResponse)
+async def discover_agents_enhanced(
+    request: EnhancedDiscoveryRequest,
+    registry_client: A2ARegistryNetworkClient = Depends(get_registry_network_client)
+) -> A2ADiscoveryResponse:
+    """
+    Enhanced agent discovery across multiple registry networks.
+    
+    This endpoint now integrates with external A2A registry networks to discover
+    agents beyond the local system, with reputation scoring and intelligent filtering.
+    """
+    # Start distributed tracing
+    async with A2ATracer.trace_agent_discovery(
+        capabilities=request.capabilities_needed,
+        location=request.location
+    ) as span:
+        try:
+            # Convert network type strings to enums
+            preferred_networks = []
+            for network_str in request.preferred_networks:
+                try:
+                    preferred_networks.append(RegistryNetworkType(network_str))
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Invalid network type: {network_str}"
+                    )
+            
+            exclude_networks = []
+            for network_str in request.exclude_networks:
+                try:
+                    exclude_networks.append(RegistryNetworkType(network_str))
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Invalid network type: {network_str}"
+                    )
+            
+            # Create discovery criteria
+            criteria = AgentDiscoveryCriteria(
+                capabilities_needed=request.capabilities_needed,
+                agent_type=request.agent_type,
+                location=request.location,
+                business_category=request.business_category,
+                min_reputation_score=request.min_reputation_score,
+                max_response_time_ms=request.max_response_time_ms,
+                preferred_networks=preferred_networks,
+                exclude_networks=exclude_networks,
+                max_results=request.max_results
+            )
+            
+            # Add tracing attributes
+            span.set_attribute("a2a.discovery.capabilities_count", len(request.capabilities_needed))
+            span.set_attribute("a2a.discovery.max_results", request.max_results)
+            span.set_attribute("a2a.discovery.min_reputation", request.min_reputation_score)
+            
+            # Discover agents across networks
+            response = await registry_client.discover_agents_across_networks(criteria)
+            
+            # Add success metrics to span
+            span.set_attribute("a2a.discovery.agents_found", response.total_found)
+            span.set_attribute("a2a.discovery.networks_queried", len(preferred_networks))
+            
+            return response
+            
+        except Exception as e:
+            # Add error information to span
+            span.set_attribute("a2a.discovery.error", str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Agent discovery failed: {str(e)}"
+            )
+
+
+@router.post("/discover/local", response_model=A2ADiscoveryResponse)
+async def discover_local_agents(request: A2ADiscoveryRequest) -> A2ADiscoveryResponse:
+    """
+    Legacy endpoint for discovering only local agents.
+    Maintained for backward compatibility.
+    """
+    # This would return only local agents
+    # For now, return empty response to maintain compatibility
+    return A2ADiscoveryResponse(agents=[], total_found=0)
+
+
+@router.post("/register")
+async def register_agent_with_networks(
+    agent_card: A2AAgentCard,
+    registry_client: A2ARegistryNetworkClient = Depends(get_registry_network_client)
+) -> Dict[str, Any]:
+    """
+    Register this agent with all configured registry networks.
+    """
+    try:
+        registration_results = await registry_client.register_agent_with_networks(agent_card)
+        
+        successful_registrations = sum(1 for success in registration_results.values() if success)
+        total_attempts = len(registration_results)
+        
+        return {
+            "success": successful_registrations > 0,
+            "successful_registrations": successful_registrations,
+            "total_attempts": total_attempts,
+            "registration_results": registration_results
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agent registration failed: {str(e)}"
+        )

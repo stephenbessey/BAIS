@@ -1,13 +1,23 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 import asyncio
 from enum import Enum
+import uuid
+from datetime import datetime
 
 from .ap2_client import AP2Client
 from .models import PaymentWorkflow, PaymentStatus, BusinessIntent
 from ..business_query_repository import BusinessQueryRepository
 from ..exceptions import ValidationError, IntegrationError
 from ..workflow_event_bus import publish_workflow_event, WorkflowEventType
+from ..circuit_breaker import (
+    get_circuit_breaker_manager, 
+    CircuitBreakerConfig, 
+    AP2_PAYMENT_CONFIG, 
+    AP2_MANDATE_CONFIG,
+    CircuitBreakerOpenException,
+    CircuitBreakerTimeoutException
+)
 
 
 class PaymentWorkflowStep(Enum):
@@ -32,7 +42,7 @@ class PaymentCoordinationRequest:
 
 class PaymentCoordinator:
     """
-    Coordinates complex payment workflows using AP2 protocol
+    Coordinates complex payment workflows using AP2 protocol with circuit breaker protection
     Implements Command pattern for workflow management
     """
     
@@ -44,6 +54,15 @@ class PaymentCoordinator:
         self._ap2_client = ap2_client
         self._business_repository = business_repository
         self._active_workflows: Dict[str, PaymentWorkflow] = {}
+        
+        # Initialize circuit breakers for different AP2 operations
+        self._circuit_manager = get_circuit_breaker_manager()
+        self._mandate_circuit = self._circuit_manager.get_or_create_circuit(
+            "ap2_mandate_operations", AP2_MANDATE_CONFIG
+        )
+        self._payment_circuit = self._circuit_manager.get_or_create_circuit(
+            "ap2_payment_execution", AP2_PAYMENT_CONFIG
+        )
     
     async def initiate_payment_workflow(
         self, 
@@ -121,58 +140,91 @@ class PaymentCoordinator:
         workflow: PaymentWorkflow, 
         request: PaymentCoordinationRequest
     ) -> None:
-        """Execute intent mandate creation"""
+        """Execute intent mandate creation with circuit breaker protection"""
         workflow.current_step = PaymentWorkflowStep.INTENT_MANDATE
         
-        intent_mandate = await self._ap2_client.create_intent_mandate(
-            user_id=request.user_id,
-            business_id=request.business_id,
-            intent_description=request.intent_description,
-            constraints=request.payment_constraints
-        )
-        
-        workflow.intent_mandate_id = intent_mandate.id
-        workflow.status = PaymentStatus.INTENT_AUTHORIZED
+        try:
+            intent_mandate = await self._mandate_circuit.call(
+                self._ap2_client.create_intent_mandate,
+                user_id=request.user_id,
+                business_id=request.business_id,
+                intent_description=request.intent_description,
+                constraints=request.payment_constraints
+            )
+            
+            workflow.intent_mandate_id = intent_mandate.id
+            workflow.status = PaymentStatus.INTENT_AUTHORIZED
+            
+        except CircuitBreakerOpenException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment service temporarily unavailable"
+            raise IntegrationError(f"AP2 mandate service unavailable: {str(e)}")
+        except CircuitBreakerTimeoutException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment service timeout"
+            raise IntegrationError(f"AP2 mandate service timeout: {str(e)}")
     
     async def _execute_cart_mandate_step(
         self, 
         workflow: PaymentWorkflow, 
         request: PaymentCoordinationRequest
     ) -> None:
-        """Execute cart mandate creation"""
+        """Execute cart mandate creation with circuit breaker protection"""
         workflow.current_step = PaymentWorkflowStep.CART_MANDATE
         
         total_amount = sum(item.get('price', 0) * item.get('quantity', 1) 
                           for item in request.cart_items)
         
-        cart_mandate = await self._ap2_client.create_cart_mandate(
-            intent_mandate_id=workflow.intent_mandate_id,
-            cart_items=request.cart_items,
-            total_amount=total_amount,
-            currency=request.currency or "USD"
-        )
-        
-        workflow.cart_mandate_id = cart_mandate.id
-        workflow.status = PaymentStatus.CART_CONFIRMED
+        try:
+            cart_mandate = await self._mandate_circuit.call(
+                self._ap2_client.create_cart_mandate,
+                intent_mandate_id=workflow.intent_mandate_id,
+                cart_items=request.cart_items,
+                total_amount=total_amount,
+                currency=request.currency or "USD"
+            )
+            
+            workflow.cart_mandate_id = cart_mandate.id
+            workflow.status = PaymentStatus.CART_CONFIRMED
+            
+        except CircuitBreakerOpenException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment service temporarily unavailable"
+            raise IntegrationError(f"AP2 cart mandate service unavailable: {str(e)}")
+        except CircuitBreakerTimeoutException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment service timeout"
+            raise IntegrationError(f"AP2 cart mandate service timeout: {str(e)}")
     
     async def _execute_payment_step(
         self, 
         workflow: PaymentWorkflow, 
         request: PaymentCoordinationRequest
     ) -> None:
-        """Execute actual payment"""
+        """Execute actual payment with circuit breaker protection"""
         workflow.current_step = PaymentWorkflowStep.PAYMENT_EXECUTION
         
         # Get payment method (this would integrate with user's payment methods)
         payment_method = await self._get_payment_method(request.payment_method_id)
         
-        transaction = await self._ap2_client.execute_payment(
-            cart_mandate_id=workflow.cart_mandate_id,
-            payment_method=payment_method
-        )
-        
-        workflow.transaction_id = transaction.id
-        workflow.status = PaymentStatus.PAYMENT_PROCESSING
+        try:
+            transaction = await self._payment_circuit.call(
+                self._ap2_client.execute_payment,
+                cart_mandate_id=workflow.cart_mandate_id,
+                payment_method=payment_method
+            )
+            
+            workflow.transaction_id = transaction.id
+            workflow.status = PaymentStatus.PAYMENT_PROCESSING
+            
+        except CircuitBreakerOpenException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment execution service temporarily unavailable"
+            raise IntegrationError(f"AP2 payment execution service unavailable: {str(e)}")
+        except CircuitBreakerTimeoutException as e:
+            workflow.status = PaymentStatus.FAILED
+            workflow.error_message = "Payment execution timeout"
+            raise IntegrationError(f"AP2 payment execution timeout: {str(e)}")
     
     async def _get_payment_method(self, payment_method_id: str):
         """Get payment method details - placeholder for integration"""

@@ -9,6 +9,11 @@ from cryptography.hazmat.primitives import serialization
 
 from .models import AP2Mandate, AP2Transaction, PaymentMethod, VerifiableCredential
 from .ap2_mandate_validator import AP2MandateValidator, AP2MandateValidationError
+from ..connection_pool_manager import (
+    get_connection_pool_manager, 
+    AP2_POOL_CONFIG,
+    ConnectionPoolConfig
+)
 
 
 @dataclass
@@ -23,15 +28,27 @@ class AP2ClientConfig:
 
 class AP2Client:
     """
-    AP2 Protocol Client
+    AP2 Protocol Client with Connection Pooling
     Handles all communication with AP2-compliant payment processors
     """
     
     def __init__(self, config: AP2ClientConfig):
         self._config = config
-        self._http_client = httpx.AsyncClient(timeout=config.timeout)
         self._private_key = self._load_private_key(config.private_key)
         self._mandate_validator = AP2MandateValidator(config.public_key)
+        
+        # Initialize connection pool manager
+        self._pool_manager = get_connection_pool_manager()
+        self._pool_name = f"ap2_client_{config.client_id}"
+        
+        # Create optimized connection pool for AP2
+        pool_config = AP2_POOL_CONFIG
+        pool_config.connect_timeout = config.timeout
+        self._http_client = self._pool_manager.get_or_create_pool(
+            self._pool_name, 
+            config.base_url, 
+            pool_config
+        )
     
     async def create_intent_mandate(
         self, 
