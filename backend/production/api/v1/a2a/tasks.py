@@ -4,7 +4,7 @@ from typing import Dict, Any, AsyncIterator
 import asyncio
 
 from ...core.a2a_integration import A2ATaskRequest, A2ATaskStatus, A2ATaskResult
-from ...core.a2a_processor_manager import get_processor_manager, A2AProcessorManager
+from ...core.a2a_dependency_injection import get_processor_manager, A2AProcessorManager
 from ...core.protocol_configurations import A2A_CONFIG
 from ...core.comprehensive_error_handler import (
     handle_a2a_error, ValidationError, BusinessLogicError, 
