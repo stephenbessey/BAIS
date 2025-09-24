@@ -1,6 +1,6 @@
 """
-AP2 Cryptographic Security Tests - Clean Code Implementation
-Comprehensive security testing for AP2 cryptographic operations following Clean Code principles
+AP2 Cryptographic Security Tests
+Comprehensive security testing for AP2 cryptographic operations
 """
 
 import pytest
@@ -17,7 +17,7 @@ from ...core.constants import AP2Limits, SecurityConstants
 
 
 class TestAP2CryptoSecurity:
-    """Test AP2 cryptographic security following Clean Code principles"""
+    """Test AP2 cryptographic security following testing best practices"""
     
     @pytest.fixture
     def test_key_pair(self):

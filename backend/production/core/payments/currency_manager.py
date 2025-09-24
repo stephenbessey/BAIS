@@ -1,6 +1,6 @@
 """
-AP2 Currency Manager - Clean Code Implementation
-Multi-currency support for AP2 payment protocol following Clean Code principles
+AP2 Currency Manager - Implementation
+Multi-currency support for AP2 payment protocol following best practices
 """
 
 import logging
@@ -80,7 +80,7 @@ class CurrencyConversion:
 
 
 class CurrencyManager:
-    """Manages multi-currency operations for AP2 protocol following Clean Code principles"""
+    """Manages multi-currency operations for AP2 protocol following best practices"""
     
     def __init__(self, exchange_rate_provider: Optional[str] = None):
         self._exchange_rate_provider = exchange_rate_provider or "default"

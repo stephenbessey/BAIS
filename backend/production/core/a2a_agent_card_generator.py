@@ -1,5 +1,5 @@
 """
-A2A Agent Card Generator - Clean Code Implementation
+A2A Agent Card Generator - Implementation
 Generates compliant A2A agent cards with dynamic capability discovery
 """
 

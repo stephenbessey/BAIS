@@ -1,6 +1,6 @@
 """
-Security Audit Logger - Clean Code Implementation
-Comprehensive audit logging for security events following Clean Code principles
+Security Audit Logger
+Comprehensive audit logging for security events following security best practices
 """
 
 import logging
@@ -97,7 +97,7 @@ class AuditEvent:
 
 class SecurityAuditLogger:
     """
-    Security audit logger following Clean Code principles
+    Security audit logger following security best practices
     Logs all security-relevant events for compliance and forensics
     """
     

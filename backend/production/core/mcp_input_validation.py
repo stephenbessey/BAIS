@@ -1,5 +1,5 @@
 """
-MCP Input Validation - Clean Code Implementation
+MCP Input Validation - Implementation
 Comprehensive input validation for all MCP endpoints following security best practices
 """
 
@@ -441,7 +441,7 @@ class MCPReadResourceRequest(BaseMCPSchema):
 
 # Validation service
 class MCPInputValidator:
-    """Service for validating MCP inputs following Clean Code principles"""
+    """Service for validating MCP inputs following best practices"""
     
     @staticmethod
     def validate_initialize_request(data: Dict[str, Any]) -> MCPInitializeRequest:

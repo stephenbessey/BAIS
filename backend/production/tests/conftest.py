@@ -1,5 +1,5 @@
 """
-Test Configuration - Clean Code Implementation
+Test Configuration - Implementation
 Shared test fixtures and configuration for cross-protocol integration tests
 """
 

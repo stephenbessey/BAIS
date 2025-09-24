@@ -1,5 +1,5 @@
 """
-Business Validator - Clean Code Implementation
+Business Validator - Implementation
 Extracts business validation logic from PaymentCoordinator to follow SRP
 """
 

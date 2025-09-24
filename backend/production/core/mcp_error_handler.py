@@ -1,5 +1,5 @@
 """
-MCP Error Handler - Clean Code Implementation
+MCP Error Handler - Implementation
 Centralized error handling with proper exception types and security-conscious messaging
 """
 
@@ -26,7 +26,7 @@ class ErrorType(Enum):
 
 
 class MCPError(Exception):
-    """Base MCP error following Clean Code principles"""
+    """Base MCP error following best practices"""
     
     def __init__(self, message: str, error_type: ErrorType, details: Dict[str, Any] = None):
         self.message = message
@@ -163,7 +163,7 @@ class ErrorResponse:
 
 
 class MCPErrorHandler:
-    """Centralized error handling following Clean Code principles"""
+    """Centralized error handling following best practices"""
     
     def __init__(self, logger: logging.Logger):
         self._logger = logger

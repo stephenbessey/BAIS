@@ -1,5 +1,5 @@
 """
-A2A SSE Router - Clean Code Implementation
+A2A SSE Router - Implementation
 FastAPI router for A2A Server-Sent Events endpoints for real-time task streaming
 """
 
@@ -53,7 +53,7 @@ class A2ATaskStreamResponse(BaseModel):
 
 
 class A2ASSEConnectionManager:
-    """Manages A2A SSE connections and task streaming following Clean Code principles"""
+    """Manages A2A SSE connections and task streaming following best practices"""
     
     def __init__(self, sse_transport_manager: MCPSSETransportManager):
         self._sse_manager = sse_transport_manager

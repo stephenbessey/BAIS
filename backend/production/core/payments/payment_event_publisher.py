@@ -1,5 +1,5 @@
 """
-Payment Event Publisher - Clean Code Implementation
+Payment Event Publisher - Implementation
 Extracts event publishing logic from PaymentCoordinator to follow SRP
 """
 

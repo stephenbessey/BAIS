@@ -1,6 +1,6 @@
 """
-MCP Configuration Management - Clean Code Implementation
-Centralized configuration for MCP server following Clean Code principles
+MCP Configuration Management - Implementation
+Centralized configuration for MCP server following best practices
 """
 
 import os
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class DatabaseConfig:
-    """Database configuration following Clean Code principles"""
+    """Database configuration following best practices"""
     host: str = "localhost"
     port: int = 5432
     database: str = "bais_mcp"
@@ -47,7 +47,7 @@ class RedisConfig:
 
 @dataclass
 class SecurityConfig:
-    """Security configuration following Clean Code principles"""
+    """Security configuration following best practices"""
     # Rate limiting
     rate_limit_per_minute: int = 60
     rate_limit_per_hour: int = 1000
@@ -82,7 +82,7 @@ class SecurityConfig:
 
 @dataclass
 class LoggingConfig:
-    """Logging configuration following Clean Code principles"""
+    """Logging configuration following best practices"""
     level: str = "INFO"
     format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     file_path: Optional[str] = None
@@ -128,7 +128,7 @@ class A2AConfig:
 
 @dataclass
 class MCPServerConfig:
-    """Main MCP server configuration following Clean Code principles"""
+    """Main MCP server configuration following best practices"""
     
     # Server settings
     host: str = "0.0.0.0"
@@ -193,7 +193,7 @@ class MCPServerConfig:
 
 
 class MCPSettingsManager:
-    """Configuration manager following Clean Code principles"""
+    """Configuration manager following best practices"""
     
     def __init__(self, config_path: Optional[str] = None):
         self._config_path = config_path

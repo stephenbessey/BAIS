@@ -1,6 +1,6 @@
 """
-MCP Graceful Shutdown Handler - Clean Code Implementation
-Handles graceful shutdown of MCP server following Clean Code principles
+MCP Graceful Shutdown Handler - Implementation
+Handles graceful shutdown of MCP server following best practices
 """
 
 import asyncio
@@ -61,7 +61,7 @@ class ShutdownStatus:
 
 
 class GracefulShutdownManager:
-    """Graceful shutdown manager following Clean Code principles"""
+    """Graceful shutdown manager following best practices"""
     
     def __init__(self, shutdown_timeout_seconds: int = 60):
         self._shutdown_timeout = shutdown_timeout_seconds

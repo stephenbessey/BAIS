@@ -1,5 +1,5 @@
 """
-Workflow State Manager - Clean Code Solution
+Workflow State Manager Solution
 Eliminates global state violations using proper dependency injection and storage abstraction
 """
 

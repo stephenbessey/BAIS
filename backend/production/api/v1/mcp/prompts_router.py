@@ -1,5 +1,5 @@
 """
-MCP Prompts Router - Clean Code Implementation
+MCP Prompts Router - Implementation
 FastAPI router for MCP Prompts primitive endpoints
 """
 

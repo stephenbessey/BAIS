@@ -187,7 +187,7 @@ class KeyManager:
 class CryptographicMandateValidator:
     """
     Complete AP2 mandate cryptographic validation implementation.
-    Follows Clean Code principles with proper separation of concerns.
+    Follows best practices with proper separation of concerns.
     """
     
     def __init__(self, key_manager: KeyManager):

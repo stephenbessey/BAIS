@@ -1,6 +1,6 @@
 """
-MCP Server-Sent Events (SSE) Transport Implementation - Clean Code
-Implements SSE transport for MCP protocol following Clean Code principles
+MCP Server-Sent Events (SSE) Transport Implementation
+Implements SSE transport for MCP protocol following best practices
 """
 
 import asyncio
@@ -64,7 +64,7 @@ class MCPSSEClient:
 
 
 class MCPSSETransportManager:
-    """SSE transport manager following Clean Code principles"""
+    """SSE transport manager following best practices"""
     
     def __init__(self, ping_interval_seconds: int = None, client_timeout_seconds: int = None):
         from .constants import SSEConnectionLimits

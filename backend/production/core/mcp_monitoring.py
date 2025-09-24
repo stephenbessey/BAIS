@@ -1,5 +1,5 @@
 """
-MCP Monitoring and Observability - Clean Code Implementation
+MCP Monitoring and Observability - Implementation
 Comprehensive monitoring, metrics, and observability for MCP server
 """
 
@@ -64,7 +64,7 @@ class PerformanceMetrics:
 
 
 class MetricsCollector:
-    """Metrics collection following Clean Code principles"""
+    """Metrics collection following best practices"""
     
     def __init__(self, max_metrics_history: int = 1000):
         self._max_metrics_history = max_metrics_history
@@ -174,7 +174,7 @@ class MetricsCollector:
 
 
 class HealthChecker:
-    """Health check system following Clean Code principles"""
+    """Health check system following best practices"""
     
     def __init__(self):
         self._health_checks: Dict[str, Callable] = {}
@@ -264,7 +264,7 @@ class HealthChecker:
 
 
 class SystemMetricsCollector:
-    """System metrics collection following Clean Code principles"""
+    """System metrics collection following best practices"""
     
     def __init__(self, metrics_collector: MetricsCollector):
         self._metrics = metrics_collector
@@ -310,7 +310,7 @@ class SystemMetricsCollector:
 
 
 class MCPMetricsCollector:
-    """MCP-specific metrics collection following Clean Code principles"""
+    """MCP-specific metrics collection following best practices"""
     
     def __init__(self, metrics_collector: MetricsCollector):
         self._metrics = metrics_collector
@@ -388,7 +388,7 @@ class MCPMetricsCollector:
 
 
 class PerformanceMonitor:
-    """Performance monitoring following Clean Code principles"""
+    """Performance monitoring following best practices"""
     
     def __init__(self, metrics_collector: MetricsCollector, mcp_metrics: MCPMetricsCollector):
         self._metrics = metrics_collector
@@ -470,7 +470,7 @@ class PerformanceMonitor:
 
 
 class MonitoringService:
-    """Central monitoring service following Clean Code principles"""
+    """Central monitoring service following best practices"""
     
     def __init__(self, config: Any = None):  # MCPServerConfig
         self._config = config

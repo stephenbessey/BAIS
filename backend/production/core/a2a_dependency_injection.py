@@ -1,5 +1,5 @@
 """
-A2A Dependency Injection - Clean Code Solution
+A2A Dependency Injection Solution
 Eliminates global state violation using proper DI patterns
 """
 

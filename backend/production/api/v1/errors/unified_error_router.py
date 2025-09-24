@@ -1,5 +1,5 @@
 """
-Unified Error Router - Clean Code Implementation
+Unified Error Router - Implementation
 FastAPI router for unified error handling across all protocols
 """
 

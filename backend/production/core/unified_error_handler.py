@@ -1,6 +1,6 @@
 """
-Unified Error Handler - Clean Code Implementation
-Centralized error handling across all protocols (A2A, AP2, MCP) following Clean Code principles
+Unified Error Handler - Implementation
+Centralized error handling across all protocols (A2A, AP2, MCP) following best practices
 """
 
 import logging
@@ -113,7 +113,7 @@ class UnifiedError:
 
 
 class UnifiedErrorHandler:
-    """Unified error handler for all protocols following Clean Code principles"""
+    """Unified error handler for all protocols following best practices"""
     
     def __init__(self):
         self._error_history: List[UnifiedError] = []

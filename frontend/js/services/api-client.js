@@ -1,5 +1,5 @@
 /**
- * Refactored API Client following Clean Code principles
+ * Refactored API Client following best practices
  * 
  * This module provides a clean, testable API client with proper error handling,
  * retry logic, and separation of concerns.

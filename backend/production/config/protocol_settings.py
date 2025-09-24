@@ -1,6 +1,6 @@
 """
 Enhanced Protocol Configuration Management
-Implements Clean Code principles for configuration
+Implements best practices for configuration
 """
 
 from typing import Optional, List
@@ -65,7 +65,7 @@ class AP2Settings(BaseSettings):
 
 @dataclass(frozen=True)
 class ProtocolConstants:
-    """Protocol constants following Clean Code principles"""
+    """Protocol constants following best practices"""
     
     # A2A Constants
     A2A_AGENT_CARD_PATH: str = "/.well-known/agent.json"

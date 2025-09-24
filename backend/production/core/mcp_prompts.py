@@ -1,6 +1,6 @@
 """
-MCP Prompts Implementation - Clean Code Implementation
-Comprehensive prompt templates and management for MCP protocol following Clean Code principles
+MCP Prompts Implementation - Implementation
+Comprehensive prompt templates and management for MCP protocol following best practices
 """
 
 import asyncio
@@ -50,7 +50,7 @@ class PromptVariable:
 
 @dataclass
 class PromptTemplate:
-    """MCP prompt template following Clean Code principles"""
+    """MCP prompt template following best practices"""
     name: str
     description: str
     prompt_type: PromptType
@@ -97,7 +97,7 @@ class PromptTemplate:
 
 
 class MCPPromptManager:
-    """Manages MCP prompt templates following Clean Code principles"""
+    """Manages MCP prompt templates following best practices"""
     
     def __init__(self):
         self._templates: Dict[str, PromptTemplate] = {}
@@ -472,7 +472,7 @@ Output Format:
 
 
 class MCPPromptExecutor:
-    """Executes MCP prompts and handles responses following Clean Code principles"""
+    """Executes MCP prompts and handles responses following best practices"""
     
     def __init__(self, prompt_manager: MCPPromptManager):
         self._prompt_manager = prompt_manager

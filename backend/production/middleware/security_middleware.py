@@ -1,5 +1,5 @@
 """
-Security Middleware - Clean Code Implementation
+Security Middleware - Implementation
 Rate limiting, audit logging, and security headers following MCP best practices
 """
 
@@ -44,7 +44,7 @@ class AuditEvent:
 
 
 class RateLimiter:
-    """Rate limiter implementation following Clean Code principles"""
+    """Rate limiter implementation following best practices"""
     
     def __init__(self):
         # Store rate limit data: {client_id: deque of timestamps}
@@ -116,7 +116,7 @@ class RateLimiter:
 
 
 class AuditLogger:
-    """Audit logger for security events following Clean Code principles"""
+    """Audit logger for security events following best practices"""
     
     def __init__(self, logger: logging.Logger):
         self._logger = logger

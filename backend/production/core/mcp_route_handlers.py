@@ -1,5 +1,5 @@
 """
-MCP Route Handlers - Clean Code Implementation
+MCP Route Handlers - Implementation
 Refactored route handlers following Single Responsibility Principle
 """
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPRouteHandler(ABC):
-    """Base class for MCP route handlers following Clean Code principles"""
+    """Base class for MCP route handlers following best practices"""
     
     def __init__(self, auth_service, error_handler: MCPErrorHandler):
         self._auth_service = auth_service
@@ -122,7 +122,7 @@ class ResourceHandler(MCPRouteHandler):
             raise HTTPException(500, detail=error_response)
     
     def _is_valid_resource_uri(self, uri: str) -> bool:
-        """Validate resource URI format following Clean Code principles"""
+        """Validate resource URI format following best practices"""
         valid_schemes = ['availability', 'service', 'business']
         try:
             scheme, path = uri.split('://', 1)

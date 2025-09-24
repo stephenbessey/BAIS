@@ -1,6 +1,6 @@
 """
 Enhanced Error Handling for A2A and AP2 Protocols
-Implements Clean Code error handling with structured logging
+Implements error handling with structured logging following best practices
 """
 
 import logging

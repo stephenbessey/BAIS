@@ -1,5 +1,5 @@
 """
-MCP Audit Logger - Clean Code Implementation
+MCP Audit Logger - Implementation
 Comprehensive audit logging for security events and compliance
 """
 
@@ -45,7 +45,7 @@ class AuditSeverity(Enum):
 
 @dataclass
 class AuditEvent:
-    """Audit event structure following Clean Code principles"""
+    """Audit event structure following best practices"""
     event_id: str
     event_type: AuditEventType
     severity: AuditSeverity
@@ -213,7 +213,7 @@ class FileAuditStorage(AuditStorage):
 
 
 class MCPAuditLogger:
-    """Main audit logger for MCP operations following Clean Code principles"""
+    """Main audit logger for MCP operations following best practices"""
     
     def __init__(self, storage: AuditStorage, logger: logging.Logger):
         self._storage = storage

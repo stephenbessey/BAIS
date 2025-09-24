@@ -1,5 +1,5 @@
 """
-Redis Cache Manager - Clean Code Implementation
+Redis Cache Manager
 Intelligent caching strategy for performance optimization
 """
 

@@ -1,6 +1,6 @@
 """
-Authentication Security Tests - Clean Code Implementation
-Comprehensive security testing for authentication flows following Clean Code principles
+Authentication Security Tests
+Comprehensive security testing for authentication flows
 """
 
 import pytest
@@ -16,7 +16,7 @@ from ...core.constants import SecurityConstants, OAuthLimits
 
 
 class TestAuthenticationSecurity:
-    """Test authentication security following Clean Code principles"""
+    """Test authentication security following testing best practices"""
     
     @pytest.fixture
     def test_client(self):

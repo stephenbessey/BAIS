@@ -1,6 +1,6 @@
 """
-Cross-Protocol Integration Tests - Clean Code Implementation
-Comprehensive tests for A2A, AP2, and MCP protocol integration following Clean Code principles
+Cross-Protocol Integration Tests - Implementation
+Comprehensive tests for A2A, AP2, and MCP protocol integration following best practices
 """
 
 import pytest

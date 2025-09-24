@@ -1,5 +1,5 @@
 """
-Secure Secrets Manager - Clean Code Implementation
+Secure Secrets Manager
 Centralized secrets management following security best practices
 """
 

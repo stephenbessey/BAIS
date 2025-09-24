@@ -1,6 +1,6 @@
 """
-MCP Subscription Manager - Clean Code Implementation
-Manages real-time subscriptions for MCP protocol following Clean Code principles
+MCP Subscription Manager
+Manages real-time subscriptions for MCP protocol following best practices
 """
 
 import asyncio
@@ -48,7 +48,7 @@ class SubscriptionFilter:
 
 @dataclass
 class MCPSubscription:
-    """MCP subscription following Clean Code principles"""
+    """MCP subscription following best practices"""
     subscription_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     client_id: str = ""
     subscription_type: SubscriptionType = SubscriptionType.RESOURCE_CHANGE
@@ -140,7 +140,7 @@ class NotificationEvent:
 
 
 class MCPSubscriptionManager:
-    """Manages MCP subscriptions following Clean Code principles"""
+    """Manages MCP subscriptions following best practices"""
     
     def __init__(self, max_subscriptions_per_client: int = None, default_expiry_hours: int = None):
         from .constants import MCPLimits

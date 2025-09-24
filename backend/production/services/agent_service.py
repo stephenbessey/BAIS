@@ -1,5 +1,5 @@
 """
-Refactored AgentService following Clean Code principles
+Refactored AgentService following best practices
 """
 
 import uuid

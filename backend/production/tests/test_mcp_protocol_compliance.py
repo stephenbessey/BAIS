@@ -1,5 +1,5 @@
 """
-MCP Protocol Compliance Tests - Clean Code Implementation
+MCP Protocol Compliance Tests - Implementation
 Comprehensive test suite for MCP protocol implementation and security
 """
 

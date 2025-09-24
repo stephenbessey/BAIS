@@ -1,5 +1,5 @@
 """
-MCP Subscription Router - Clean Code Implementation
+MCP Subscription Router - Implementation
 FastAPI router for MCP subscription management endpoints
 """
 

@@ -1,5 +1,5 @@
 """
-MCP SSE Router - Clean Code Implementation
+MCP SSE Router - Implementation
 FastAPI router for MCP Server-Sent Events endpoints
 """
 

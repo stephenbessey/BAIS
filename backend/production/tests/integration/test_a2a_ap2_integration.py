@@ -1,6 +1,6 @@
 """
 Comprehensive A2A and AP2 Integration Tests
-Tests the complete integration following Clean Code testing principles
+Tests the complete integration following testing best practices
 """
 
 import pytest

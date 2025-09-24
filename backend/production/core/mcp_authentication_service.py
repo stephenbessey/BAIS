@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class AuthContext:
-    """Authentication context following Clean Code principles"""
+    """Authentication context following best practices"""
     user_id: str
     client_id: str
     scopes: List[str]
