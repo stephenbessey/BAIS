@@ -8,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from .routes import api_router
 from .api.v1.a2a.discovery import router as a2a_discovery_router
 from .api.v1.a2a.tasks import router as a2a_tasks_router
+from .api.v1.a2a.sse_router import router as a2a_sse_router
+from .api.v1.mcp.sse_router import router as mcp_sse_router
+from .api.v1.mcp.prompts_router import router as mcp_prompts_router
+from .api.v1.mcp.subscription_router import router as mcp_subscription_router
+from .api.v1.errors.unified_error_router import router as unified_error_router
 
 
 class BAISApplicationFactory:
@@ -48,14 +53,27 @@ class BAISApplicationFactory:
 		# A2A protocol routes
 		app.include_router(a2a_discovery_router, tags=["A2A Discovery"])
 		app.include_router(a2a_tasks_router, tags=["A2A Tasks"])
+		app.include_router(a2a_sse_router, tags=["A2A SSE"])
 		
-		@app.get("/")
-		def root():
-			return {"message": "BAIS Production Server is running"}
-		
-		@app.get("/health")
-		def health_check():
-			return {"status": "healthy", "service": "BAIS Production Server"}
+	@app.get("/")
+	def root():
+		return {"message": "BAIS Production Server is running"}
+	
+	@app.get("/health")
+	def health_check():
+		return {"status": "healthy", "service": "BAIS Production Server"}
+	
+	# MCP SSE transport routes
+	app.include_router(mcp_sse_router, tags=["MCP SSE"])
+	
+	# MCP Prompts primitive routes
+	app.include_router(mcp_prompts_router, tags=["MCP Prompts"])
+	
+	# MCP Subscription management routes
+	app.include_router(mcp_subscription_router, tags=["MCP Subscriptions"])
+	
+	# Unified error handling routes
+	app.include_router(unified_error_router, tags=["Unified Error Handling"])
 
 
 # Create application instance
