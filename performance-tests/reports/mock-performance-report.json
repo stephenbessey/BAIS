@@ -1,0 +1,76 @@
+{
+  "timestamp": "2025-09-24 15:51:00",
+  "test_type": "Mock Performance Test",
+  "baseline_results": {
+    "/mcp/resources/list": {
+      "mean": 152.54375987727818,
+      "median": 101.61921358924556,
+      "min": 80.83542049709567,
+      "max": 669.6363538522111,
+      "stdev": 146.82338322645694,
+      "errors": 0,
+      "success_rate": 100.0
+    },
+    "/mcp/tools/list": {
+      "mean": 116.61996918247908,
+      "median": 110.05270831528648,
+      "min": 88.39309177413492,
+      "max": 437.33245441839944,
+      "stdev": 47.852194654315966,
+      "errors": 0,
+      "success_rate": 100.0
+    },
+    "/mcp/tools/call": {
+      "mean": 228.73254337559203,
+      "median": 157.682483608258,
+      "min": 121.4986711770404,
+      "max": 995.3991083106182,
+      "stdev": 225.57810533485699,
+      "errors": 0,
+      "success_rate": 100.0
+    },
+    "/a2a/v1/discover": {
+      "mean": 149.44834888929176,
+      "median": 122.29598726002278,
+      "min": 96.98966199834183,
+      "max": 929.7309071210337,
+      "stdev": 129.14786097448942,
+      "errors": 0,
+      "success_rate": 100.0
+    },
+    "/api/v1/payments/mandates/intent": {
+      "mean": 214.64915979527743,
+      "median": 175.853047560615,
+      "min": 146.91848170463138,
+      "max": 1531.6024095395942,
+      "stdev": 200.611687318499,
+      "errors": 0,
+      "success_rate": 100.0
+    }
+  },
+  "load_test_results": {
+    "total_requests": 8408,
+    "total_errors": 79,
+    "error_rate": 0.939581351094196,
+    "avg_response_time": 157.0857034175858,
+    "max_response_time": 1640.6948704987346,
+    "requests_per_second": 2644002.701454491,
+    "duration": 0.0031800270080566406
+  },
+  "payment_workflow_results": {
+    "total_workflows": 50,
+    "successful_workflows": 50,
+    "success_rate": 100.0,
+    "avg_workflow_time": 884.4455022552535,
+    "median_workflow_time": 822.0205679555278,
+    "min_workflow_time": 688.7269818223931,
+    "max_workflow_time": 2730.596728905338,
+    "workflows_per_second": 1.1306519140524693
+  },
+  "performance_summary": {
+    "api_response_time_target": "< 200ms",
+    "concurrent_users_target": "1000+",
+    "payment_throughput_target": "100+/sec",
+    "error_rate_target": "< 1%"
+  }
+}
