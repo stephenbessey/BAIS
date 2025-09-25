@@ -1,0 +1,585 @@
+# ============================================================================
+# BAIS Platform - Production Monitoring Alerts
+# Comprehensive alerting for production readiness
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: monitoring
+  labels:
+    app: prometheus
+    component: alerting
+data:
+  alert-rules.yaml: |
+    groups:
+    # ============================================================================
+    # Application Alerts
+    # ============================================================================
+    - name: bais_application_alerts
+      interval: 30s
+      rules:
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) 
+            / 
+            sum(rate(http_requests_total[5m]))
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: application
+          team: platform
+        annotations:
+          summary: "High error rate detected in BAIS application"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 1%)"
+          runbook_url: "https://runbooks.bais.com/high-error-rate"
+          action: "Immediate investigation required"
+
+      - alert: HighResponseTime
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: application
+          team: platform
+        annotations:
+          summary: "Response time exceeds SLA"
+          description: "95th percentile response time is {{ $value }}s (threshold: 0.2s)"
+          runbook_url: "https://runbooks.bais.com/high-response-time"
+
+      - alert: ServiceDown
+        expr: up{job="bais-application"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: application
+          team: platform
+        annotations:
+          summary: "BAIS service is down"
+          description: "Service {{ $labels.instance }} is not responding"
+          action: "Immediate investigation required"
+          runbook_url: "https://runbooks.bais.com/service-down"
+
+      - alert: LowThroughput
+        expr: sum(rate(http_requests_total[5m])) < 10
+        for: 15m
+        labels:
+          severity: warning
+          component: application
+          team: platform
+        annotations:
+          summary: "Low request throughput"
+          description: "Current throughput is {{ $value }} requests/sec (expected: >10)"
+          runbook_url: "https://runbooks.bais.com/low-throughput"
+
+      - alert: HighMemoryUsage
+        expr: container_memory_usage_bytes{container="bais-app"} / container_spec_memory_limit_bytes > 0.85
+        for: 10m
+        labels:
+          severity: warning
+          component: application
+          team: platform
+        annotations:
+          summary: "High memory usage in application container"
+          description: "Memory usage is {{ $value | humanizePercentage }} on {{ $labels.pod }}"
+          runbook_url: "https://runbooks.bais.com/high-memory-usage"
+
+    # ============================================================================
+    # Database Alerts
+    # ============================================================================
+    - name: bais_database_alerts
+      interval: 30s
+      rules:
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          pg_stat_database_numbackends / pg_settings_max_connections > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "Database connection pool near capacity"
+          description: "Connection pool usage at {{ $value | humanizePercentage }}"
+          runbook_url: "https://runbooks.bais.com/database-connections"
+
+      - alert: DatabaseSlowQueries
+        expr: |
+          rate(pg_stat_statements_mean_exec_time[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query time is {{ $value }}ms"
+          runbook_url: "https://runbooks.bais.com/slow-queries"
+
+      - alert: DatabaseReplicationLag
+        expr: |
+          pg_replication_lag_seconds > 30
+        for: 5m
+        labels:
+          severity: critical
+          component: database
+          team: platform
+        annotations:
+          summary: "Database replication lag detected"
+          description: "Replication lag is {{ $value }}s behind primary"
+          action: "Check replication status immediately"
+          runbook_url: "https://runbooks.bais.com/replication-lag"
+
+      - alert: DatabaseHighConnections
+        expr: pg_stat_activity_count > 800
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+          team: platform
+        annotations:
+          summary: "High number of database connections"
+          description: "{{ $value }} active connections to PostgreSQL"
+          runbook_url: "https://runbooks.bais.com/high-db-connections"
+
+      - alert: DatabaseDiskSpaceLow
+        expr: |
+          (pg_database_size_bytes - pg_database_size_bytes{job="postgres-exporter"}) / pg_database_size_bytes > 0.9
+        for: 10m
+        labels:
+          severity: critical
+          component: database
+          team: platform
+        annotations:
+          summary: "Database disk space critically low"
+          description: "Database disk usage at {{ $value | humanizePercentage }}"
+          action: "Immediate disk cleanup required"
+          runbook_url: "https://runbooks.bais.com/database-disk-space"
+
+    # ============================================================================
+    # Cache (Redis) Alerts
+    # ============================================================================
+    - name: bais_cache_alerts
+      interval: 30s
+      rules:
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+          team: platform
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Memory usage at {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+          runbook_url: "https://runbooks.bais.com/redis-memory-high"
+
+      - alert: RedisLowHitRate
+        expr: redis_keyspace_hits_total / (redis_keyspace_hits_total + redis_keyspace_misses_total) < 0.7
+        for: 10m
+        labels:
+          severity: warning
+          component: cache
+          team: platform
+        annotations:
+          summary: "Redis cache hit rate low"
+          description: "Cache hit rate is {{ $value | humanizePercentage }} for {{ $labels.instance }}"
+          runbook_url: "https://runbooks.bais.com/redis-low-hit-rate"
+
+      - alert: RedisConnectionFailures
+        expr: rate(redis_connected_clients[5m]) < 0
+        for: 2m
+        labels:
+          severity: critical
+          component: cache
+          team: platform
+        annotations:
+          summary: "Redis connection failures"
+          description: "Connection failures detected for {{ $labels.instance }}"
+          action: "Check Redis cluster health immediately"
+          runbook_url: "https://runbooks.bais.com/redis-connection-failures"
+
+      - alert: RedisEvictionRateHigh
+        expr: rate(redis_evicted_keys_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: cache
+          team: platform
+        annotations:
+          summary: "High Redis eviction rate"
+          description: "Eviction rate is {{ $value }} keys/sec for {{ $labels.instance }}"
+          runbook_url: "https://runbooks.bais.com/redis-eviction-rate"
+
+    # ============================================================================
+    # Infrastructure Alerts
+    # ============================================================================
+    - name: bais_infrastructure_alerts
+      interval: 30s
+      rules:
+      - alert: HighCPUUsage
+        expr: |
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "High CPU usage on node"
+          description: "CPU usage is {{ $value }}% on node {{ $labels.instance }}"
+          runbook_url: "https://runbooks.bais.com/high-cpu-usage"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "High memory usage on node"
+          description: "Memory usage is {{ $value }}% on node {{ $labels.instance }}"
+          runbook_url: "https://runbooks.bais.com/high-memory-usage"
+
+      - alert: DiskSpaceLow
+        expr: |
+          (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 90
+        for: 5m
+        labels:
+          severity: critical
+          component: infrastructure
+          team: platform
+        annotations:
+          summary: "Disk space critically low"
+          description: "Disk usage is {{ $value }}% on {{ $labels.instance }} filesystem {{ $labels.mountpoint }}"
+          action: "Immediate disk cleanup required"
+          runbook_url: "https://runbooks.bais.com/disk-space-low"
+
+      - alert: PodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: kubernetes
+          team: platform
+        annotations:
+          summary: "Pod is crash looping"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is restarting frequently"
+          action: "Check pod logs and fix underlying issue"
+          runbook_url: "https://runbooks.bais.com/pod-crash-looping"
+
+      - alert: PodNotReady
+        expr: kube_pod_status_phase{phase!="Running"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: kubernetes
+          team: platform
+        annotations:
+          summary: "Pod not ready"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is in {{ $labels.phase }} state"
+          runbook_url: "https://runbooks.bais.com/pod-not-ready"
+
+      - alert: NodeNotReady
+        expr: kube_node_status_condition{condition="Ready",status="true"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: kubernetes
+          team: platform
+        annotations:
+          summary: "Kubernetes node not ready"
+          description: "Node {{ $labels.node }} is not ready"
+          action: "Check node health and connectivity"
+          runbook_url: "https://runbooks.bais.com/node-not-ready"
+
+    # ============================================================================
+    # Business Metrics Alerts
+    # ============================================================================
+    - name: bais_business_metrics
+      interval: 60s
+      rules:
+      - alert: PaymentProcessingFailureSpike
+        expr: |
+          (
+            sum(rate(payment_processing_failed_total[5m])) 
+            / 
+            sum(rate(payment_processing_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: business
+          team: platform
+        annotations:
+          summary: "Payment failure rate spike"
+          description: "Payment failure rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          impact: "Revenue impact - immediate attention required"
+          runbook_url: "https://runbooks.bais.com/payment-failure-spike"
+
+      - alert: LowTransactionVolume
+        expr: |
+          sum(rate(payment_processing_total[30m])) < 10
+        for: 30m
+        labels:
+          severity: warning
+          component: business
+          team: platform
+        annotations:
+          summary: "Transaction volume below normal"
+          description: "Current rate: {{ $value }} transactions/sec (expected: >10)"
+          runbook_url: "https://runbooks.bais.com/low-transaction-volume"
+
+      - alert: WebhookDeliveryFailures
+        expr: |
+          (
+            sum(rate(webhook_delivery_failed_total[5m])) 
+            / 
+            sum(rate(webhook_delivery_total[5m]))
+          ) > 0.10
+        for: 10m
+        labels:
+          severity: warning
+          component: integration
+          team: platform
+        annotations:
+          summary: "High webhook delivery failure rate"
+          description: "Webhook failure rate is {{ $value | humanizePercentage }}"
+          runbook_url: "https://runbooks.bais.com/webhook-delivery-failures"
+
+      - alert: UserRegistrationDrop
+        expr: |
+          rate(user_registrations_total[1h]) < rate(user_registrations_total[1h] offset 1d) * 0.5
+        for: 30m
+        labels:
+          severity: warning
+          component: business
+          team: platform
+        annotations:
+          summary: "User registration rate significantly lower than usual"
+          description: "Current registration rate is {{ $value }} users/hour (expected: >50% of yesterday)"
+          runbook_url: "https://runbooks.bais.com/user-registration-drop"
+
+    # ============================================================================
+    # Security Alerts
+    # ============================================================================
+    - name: bais_security_alerts
+      interval: 30s
+      rules:
+      - alert: UnauthorizedAccessAttempts
+        expr: |
+          sum(rate(http_requests_total{status="401"}[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+          team: security
+        annotations:
+          summary: "High rate of unauthorized access attempts"
+          description: "{{ $value }} unauthorized attempts per second"
+          runbook_url: "https://runbooks.bais.com/unauthorized-access"
+
+      - alert: SuspiciousActivityPattern
+        expr: |
+          sum(rate(http_requests_total{status="403"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+          team: security
+        annotations:
+          summary: "Suspicious activity detected"
+          description: "Multiple forbidden access attempts from {{ $labels.source_ip }}"
+          runbook_url: "https://runbooks.bais.com/suspicious-activity"
+
+      - alert: BruteForceAttack
+        expr: |
+          sum(rate(http_requests_total{status="401"}[1m])) by (source_ip) > 10
+        for: 2m
+        labels:
+          severity: critical
+          component: security
+          team: security
+        annotations:
+          summary: "Potential brute force attack detected"
+          description: "High rate of failed authentication attempts from {{ $labels.source_ip }}"
+          action: "Consider blocking IP address"
+          runbook_url: "https://runbooks.bais.com/brute-force-attack"
+
+      - alert: SSL CertificateExpiringSoon
+        expr: |
+          (ssl_cert_not_after - time()) / 86400 < 30
+        for: 1h
+        labels:
+          severity: warning
+          component: security
+          team: platform
+        annotations:
+          summary: "SSL certificate expiring soon"
+          description: "SSL certificate for {{ $labels.instance }} expires in {{ $value }} days"
+          action: "Renew SSL certificate"
+          runbook_url: "https://runbooks.bais.com/ssl-certificate-expiry"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app: alertmanager
+    component: alerting
+data:
+  alertmanager.yaml: |
+    global:
+      resolve_timeout: 5m
+      slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+      pagerduty_url: 'https://events.pagerduty.com/v2/enqueue'
+
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 12h
+      receiver: 'default-receiver'
+      routes:
+      # Critical alerts go to PagerDuty and Slack
+      - match:
+          severity: critical
+        receiver: 'pagerduty-critical'
+        continue: true
+      
+      - match:
+          severity: critical
+        receiver: 'slack-critical'
+        continue: true
+      
+      # Warning alerts go to Slack only
+      - match:
+          severity: warning
+        receiver: 'slack-warnings'
+      
+      # Security alerts go to security team
+      - match:
+          team: security
+        receiver: 'security-team'
+
+    receivers:
+    - name: 'default-receiver'
+      slack_configs:
+      - channel: '#bais-alerts'
+        title: 'BAIS Platform Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        color: 'good'
+
+    - name: 'pagerduty-critical'
+      pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_KEY'
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        details:
+          severity: '{{ .CommonLabels.severity }}'
+          component: '{{ .CommonLabels.component }}'
+          runbook: '{{ .CommonAnnotations.runbook_url }}'
+
+    - name: 'slack-critical'
+      slack_configs:
+      - channel: '#bais-critical'
+        color: 'danger'
+        title: '🚨 CRITICAL ALERT - BAIS Platform'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Component:* {{ .CommonLabels.component }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          {{ if .CommonAnnotations.action }}*Action:* {{ .CommonAnnotations.action }}{{ end }}
+          {{ if .CommonAnnotations.runbook_url }}*Runbook:* {{ .CommonAnnotations.runbook_url }}{{ end }}
+
+    - name: 'slack-warnings'
+      slack_configs:
+      - channel: '#bais-alerts'
+        color: 'warning'
+        title: '⚠️ Warning Alert - BAIS Platform'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Component:* {{ .CommonLabels.component }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          {{ if .CommonAnnotations.runbook_url }}*Runbook:* {{ .CommonAnnotations.runbook_url }}{{ end }}
+
+    - name: 'security-team'
+      slack_configs:
+      - channel: '#bais-security'
+        color: 'danger'
+        title: '🔒 Security Alert - BAIS Platform'
+        text: |
+          *Alert:* {{ .GroupLabels.alertname }}
+          *Severity:* {{ .CommonLabels.severity }}
+          *Summary:* {{ .CommonAnnotations.summary }}
+          *Description:* {{ .CommonAnnotations.description }}
+          {{ if .CommonAnnotations.action }}*Action:* {{ .CommonAnnotations.action }}{{ end }}
+          {{ if .CommonAnnotations.runbook_url }}*Runbook:* {{ .CommonAnnotations.runbook_url }}{{ end }}
+      
+      # Also send to security team email
+      email_configs:
+      - to: 'security@baintegrate.com'
+        subject: 'Security Alert: {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Severity: {{ .CommonLabels.severity }}
+          Summary: {{ .CommonAnnotations.summary }}
+          Description: {{ .CommonAnnotations.description }}
+          {{ if .CommonAnnotations.action }}Action: {{ .CommonAnnotations.action }}{{ end }}
+
+    inhibit_rules:
+    # Inhibit warning alerts when critical alerts are firing
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'instance']
+    
+    # Inhibit individual pod alerts when node is down
+    - source_match:
+        alertname: 'NodeNotReady'
+      target_match_re:
+        alertname: 'PodNotReady|PodCrashLooping'
+      equal: ['instance']
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config-additional
+  namespace: monitoring
+data:
+  additional-scrape-configs.yaml: |
+    # Additional scrape configs for BAIS application metrics
+    - job_name: 'bais-application'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - bais-production
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_app]
+        action: keep
+        regex: bais-api
+      - source_labels: [__meta_kubernetes_pod_ip]
+        target_label: __address__
+        replacement: $1:9090
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      scrape_interval: 15s
+      scrape_timeout: 10s
+      metrics_path: /metrics

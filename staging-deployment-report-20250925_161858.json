@@ -1,0 +1,35 @@
+{
+  "timestamp": "2025-09-25T16:18:58-06:00",
+  "environment": "staging",
+  "deployment_type": "docker-compose",
+  "status": "success",
+  "services": {
+    "postgres": {
+      "container": "bais-postgres-staging",
+      "port": "5433",
+      "database": "bais_staging"
+    },
+    "redis": {
+      "container": "bais-redis-staging", 
+      "port": "6380"
+    },
+    "application": {
+      "container": "bais-app-staging",
+      "api_port": "8001",
+      "metrics_port": "9091"
+    }
+  },
+  "access_urls": {
+    "api": "http://localhost:8001",
+    "health": "http://localhost:8001/health",
+    "metrics": "http://localhost:8001/metrics",
+    "postgres": "localhost:5433",
+    "redis": "localhost:6380"
+  },
+  "next_steps": [
+    "Run acceptance tests: python scripts/acceptance_test_suite.py --url http://localhost:8001",
+    "Configure monitoring alerts",
+    "Set up on-call rotation", 
+    "Prepare for production go-live"
+  ]
+}
