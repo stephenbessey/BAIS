@@ -1,0 +1,225 @@
+# ============================================================================
+# BAIS Platform - Kibana Configuration
+# Best practices: Clear Dashboard Setup, User-Friendly Interface
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: logging
+  labels:
+    app: kibana
+    component: logging
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    elasticsearch.hosts: [ "http://elasticsearch:9200" ]
+    elasticsearch.requestTimeout: 300000
+    elasticsearch.shardTimeout: 300000
+    xpack.security.enabled: false
+    xpack.monitoring.ui.container.elasticsearch.enabled: true
+    logging.appenders:
+      file:
+        type: file
+        fileName: /var/log/kibana/kibana.log
+        layout:
+          type: json
+      console:
+        type: console
+        layout:
+          type: pattern
+          pattern: "[%d{ISO8601}][%-5p][%-25c] %m%n"
+    logging.root:
+      appenders:
+        - default
+        - console
+        - file
+    logging.appenders.default:
+      type: console
+      layout:
+        type: pattern
+        pattern: "[%d{ISO8601}][%-5p][%-25c] %m%n"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: logging
+  labels:
+    app: kibana
+    component: logging
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+        component: logging
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:8.10.0
+        ports:
+        - containerPort: 5601
+          name: http
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "http://elasticsearch:9200"
+        - name: SERVER_NAME
+          value: "kibana"
+        - name: SERVER_HOST
+          value: "0.0.0.0"
+        volumeMounts:
+        - name: config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
+        - name: logs
+          mountPath: /var/log/kibana
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: 5601
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          runAsNonRoot: true
+      volumes:
+      - name: config
+        configMap:
+          name: kibana-config
+      - name: logs
+        emptyDir: {}
+      imagePullSecrets:
+      - name: registry-credentials
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: logging
+  labels:
+    app: kibana
+spec:
+  selector:
+    app: kibana
+  ports:
+  - name: http
+    port: 5601
+    targetPort: 5601
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-dashboards
+  namespace: logging
+  labels:
+    app: kibana
+    component: dashboards
+data:
+  bais-overview.ndjson: |
+    {
+      "version": "8.10.0",
+      "objects": [
+        {
+          "id": "bais-overview-dashboard",
+          "type": "dashboard",
+          "attributes": {
+            "title": "BAIS Platform Overview",
+            "description": "Comprehensive overview of BAIS platform logs and metrics",
+            "panelsJSON": "[{\"version\":\"8.10.0\",\"gridData\":{\"x\":0,\"y\":0,\"w\":12,\"h\":8,\"i\":\"1\"},\"panelIndex\":\"1\",\"embeddableConfig\":{\"title\":\"Log Volume Over Time\"},\"panelRefName\":\"panel_1\"},{\"version\":\"8.10.0\",\"gridData\":{\"x\":12,\"y\":0,\"w\":12,\"h\":8,\"i\":\"2\"},\"panelIndex\":\"2\",\"embeddableConfig\":{\"title\":\"Error Rate\"},\"panelRefName\":\"panel_2\"}]",
+            "optionsJSON": "{\"useMargins\":true,\"syncColors\":false,\"hidePanelTitles\":false}",
+            "version": 1,
+            "timeRestore": false,
+            "kibanaSavedObjectMeta": {
+              "searchSourceJSON": "{\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"filter\":[]}"
+            }
+          },
+          "references": []
+        }
+      ]
+    }
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kibana-dashboard-setup
+  namespace: logging
+  labels:
+    app: kibana-dashboard-setup
+spec:
+  template:
+    spec:
+      containers:
+      - name: dashboard-setup
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          
+          echo "Waiting for Kibana to be ready..."
+          until curl -f http://kibana:5601/api/status; do
+            echo "Waiting for Kibana..."
+            sleep 10
+          done
+          
+          echo "Kibana is ready. Setting up dashboards..."
+          
+          # Import BAIS overview dashboard
+          curl -X POST "http://kibana:5601/api/saved_objects/_import" \
+            -H "kbn-xsrf: true" \
+            -H "Content-Type: multipart/form-data" \
+            -F file=@/dashboards/bais-overview.ndjson
+          
+          echo "Dashboards imported successfully"
+          
+        volumeMounts:
+        - name: dashboards
+          mountPath: /dashboards
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "100m"
+      volumes:
+      - name: dashboards
+        configMap:
+          name: kibana-dashboards
+      restartPolicy: OnFailure
+      backoffLimit: 3

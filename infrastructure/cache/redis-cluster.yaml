@@ -1,0 +1,385 @@
+# ============================================================================
+# BAIS Platform - Redis Cluster Configuration
+# Best practices: Single Responsibility, Clear Intent, High Availability
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: bais-production
+  labels:
+    app: redis-cluster
+    component: cache
+data:
+  redis.conf: |
+    # Redis Cluster Configuration
+    port 6379
+    cluster-enabled yes
+    cluster-config-file nodes.conf
+    cluster-node-timeout 5000
+    cluster-announce-ip ""
+    cluster-announce-port 6379
+    cluster-announce-bus-port 16379
+    
+    # Persistence Configuration
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    
+    # Memory Management
+    maxmemory 2gb
+    maxmemory-policy allkeys-lru
+    maxmemory-samples 5
+    
+    # RDB Snapshots
+    save 900 1
+    save 300 10
+    save 60 10000
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    
+    # Logging
+    loglevel notice
+    logfile ""
+    
+    # Network
+    timeout 0
+    tcp-keepalive 300
+    tcp-backlog 511
+    
+    # Security
+    protected-mode no
+    
+    # Performance
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    
+    # Client Management
+    maxclients 10000
+    
+    # Slow Log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+    
+    # Latency Monitoring
+    latency-monitor-threshold 100
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-cluster
+  namespace: bais-production
+  labels:
+    app: redis-cluster
+    component: cache
+spec:
+  serviceName: redis-cluster
+  replicas: 6
+  selector:
+    matchLabels:
+      app: redis-cluster
+  template:
+    metadata:
+      labels:
+        app: redis-cluster
+        component: cache
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+      - name: redis
+        image: redis:7.2-alpine
+        ports:
+        - containerPort: 6379
+          name: client
+        - containerPort: 16379
+          name: gossip
+        command:
+        - redis-server
+        - /conf/redis.conf
+        volumeMounts:
+        - name: conf
+          mountPath: /conf
+        - name: data
+          mountPath: /data
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 999
+          runAsGroup: 999
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: conf
+        configMap:
+          name: redis-config
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+        storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster
+  namespace: bais-production
+  labels:
+    app: redis-cluster
+spec:
+  selector:
+    app: redis-cluster
+  ports:
+  - name: client
+    port: 6379
+    targetPort: 6379
+  - name: gossip
+    port: 16379
+    targetPort: 16379
+  type: ClusterIP
+  clusterIP: None  # Headless service for StatefulSet
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster-service
+  namespace: bais-production
+  labels:
+    app: redis-cluster
+spec:
+  selector:
+    app: redis-cluster
+  ports:
+  - name: client
+    port: 6379
+    targetPort: 6379
+  type: ClusterIP
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-init
+  namespace: bais-production
+  labels:
+    app: redis-cluster-init
+spec:
+  template:
+    spec:
+      containers:
+      - name: redis-cluster-init
+        image: redis:7.2-alpine
+        command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          
+          echo "Waiting for Redis nodes to be ready..."
+          
+          # Wait for all Redis pods to be ready
+          for i in {0..5}; do
+            until redis-cli -h redis-cluster-$i.redis-cluster ping; do
+              echo "Waiting for redis-cluster-$i..."
+              sleep 2
+            done
+            echo "redis-cluster-$i is ready"
+          done
+          
+          echo "All Redis nodes are ready. Creating cluster..."
+          
+          # Get pod IPs
+          REDIS_NODES=""
+          for i in {0..5}; do
+            IP=$(getent hosts redis-cluster-$i.redis-cluster | awk '{ print $1 }')
+            REDIS_NODES="$REDIS_NODES $IP:6379"
+          done
+          
+          echo "Creating cluster with nodes: $REDIS_NODES"
+          
+          # Create cluster (3 masters, 3 replicas)
+          redis-cli --cluster create $REDIS_NODES \
+            --cluster-replicas 1 \
+            --cluster-yes
+          
+          echo "Redis cluster created successfully"
+          
+          # Verify cluster status
+          redis-cli -h redis-cluster-0.redis-cluster cluster nodes
+          
+      restartPolicy: OnFailure
+      backoffLimit: 3
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup
+  namespace: bais-production
+  labels:
+    app: redis-backup
+spec:
+  schedule: "0 1 * * *"  # Daily at 1 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: redis:7.2-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              
+              echo "Starting Redis backup..."
+              
+              # Create backup directory
+              mkdir -p /backup
+              
+              # Generate backup filename with timestamp
+              BACKUP_FILE="redis-cluster-$(date +%Y%m%d-%H%M%S).rdb"
+              
+              # Connect to first Redis node and create backup
+              redis-cli -h redis-cluster-0.redis-cluster --rdb "/backup/$BACKUP_FILE"
+              
+              # Verify backup
+              if [ -f "/backup/$BACKUP_FILE" ]; then
+                echo "Backup completed successfully: $BACKUP_FILE"
+                ls -lh "/backup/$BACKUP_FILE"
+              else
+                echo "Backup failed!"
+                exit 1
+              fi
+              
+              # Clean up old backups (keep last 7 days)
+              find /backup -name "redis-cluster-*.rdb" -mtime +7 -delete
+              echo "Old backups cleaned up"
+              
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "200m"
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: redis-backup-pvc
+          restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-backup-pvc
+  namespace: bais-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 20Gi
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-monitoring
+  namespace: bais-production
+  labels:
+    app: redis-monitoring
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: monitoring
+            image: redis:7.2-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              
+              echo "Checking Redis cluster health..."
+              
+              # Check cluster status
+              redis-cli -h redis-cluster-0.redis-cluster cluster info
+              
+              # Check memory usage
+              for i in {0..5}; do
+                echo "Node $i memory usage:"
+                redis-cli -h redis-cluster-$i.redis-cluster info memory | grep used_memory_human
+              done
+              
+              # Check key distribution
+              redis-cli -h redis-cluster-0.redis-cluster cluster nodes | grep master | wc -l
+              echo "Active master nodes: $(redis-cli -h redis-cluster-0.redis-cluster cluster nodes | grep master | wc -l)"
+              
+              echo "Redis monitoring check completed"
+              
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "50m"
+              limits:
+                memory: "256Mi"
+                cpu: "100m"
+          restartPolicy: OnFailure

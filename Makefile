@@ -1,49 +1,190 @@
-.PHONY: help build start stop restart logs clean test migrate backup restore
+# ============================================================================
+# BAIS Platform - Infrastructure Setup Makefile
+# Best practices: Clear Targets, Self-Documenting, Reusable
+# ============================================================================
+
+.PHONY: help setup deploy test clean
+
+# Default target: show help
+.DEFAULT_GOAL := help
+
+# ============================================================================
+# Configuration Variables (Override with environment variables)
+# ============================================================================
+
+NAMESPACE ?= bais-production
+MONITORING_NS ?= monitoring
+LOGGING_NS ?= logging
+VERSION ?= latest
+DB_USER ?= bais_user
+REDIS_CLUSTER_SIZE ?= 6
+KUBE_CONTEXT ?= production
+CLOUD_PROVIDER ?= aws
+REGION ?= us-east-1
+
+# ============================================================================
+# Help Target (Self-Documenting)
+# ============================================================================
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
-	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo 'Available targets:'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Build Docker images
-	docker-compose build
+# ============================================================================
+# Prerequisites & Validation
+# ============================================================================
 
-start: ## Start all services
-	docker-compose up -d
+check-tools: ## Check required tools are installed
+	@echo "Checking prerequisites..."
+	@command -v kubectl >/dev/null 2>&1 || { echo "kubectl is required but not installed"; exit 1; }
+	@command -v docker >/dev/null 2>&1 || { echo "docker is required but not installed"; exit 1; }
+	@command -v helm >/dev/null 2>&1 || { echo "helm is required but not installed"; exit 1; }
+	@command -v python3 >/dev/null 2>&1 || { echo "python3 is required but not installed"; exit 1; }
+	@echo "✓ All prerequisites satisfied"
 
-stop: ## Stop all services
-	docker-compose down
+check-env: ## Validate environment variables
+	@echo "Checking environment configuration..."
+	@test -n "$(DATABASE_URL)" || { echo "DATABASE_URL is required"; exit 1; }
+	@test -n "$(REDIS_URL)" || { echo "REDIS_URL is required"; exit 1; }
+	@test -n "$(SECRET_KEY)" || { echo "SECRET_KEY is required"; exit 1; }
+	@echo "✓ Environment validated"
 
-restart: ## Restart all services
-	docker-compose restart
+set-context: ## Set kubectl context to production
+	@kubectl config use-context $(KUBE_CONTEXT)
+	@echo "✓ Using context: $(KUBE_CONTEXT)"
 
-logs: ## View logs
-	docker-compose logs -f
+# ============================================================================
+# Infrastructure Setup - Phase 1: Foundation
+# ============================================================================
 
-clean: ## Clean up containers and volumes
-	docker-compose down -v
-	docker system prune -f
+create-namespaces: ## Create Kubernetes namespaces
+	@echo "Creating namespaces..."
+	@kubectl create namespace $(NAMESPACE) --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create namespace $(MONITORING_NS) --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create namespace $(LOGGING_NS) --dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ Namespaces created"
 
-test: ## Run tests
-	docker-compose run --rm bais-api python -m pytest
+setup-secrets: check-env ## Create Kubernetes secrets
+	@echo "Setting up secrets..."
+	@kubectl create secret generic bais-secrets \
+		--from-literal=database-url="$(DATABASE_URL)" \
+		--from-literal=redis-url="$(REDIS_URL)" \
+		--from-literal=secret-key="$(SECRET_KEY)" \
+		--namespace=$(NAMESPACE) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create secret generic postgres-secrets \
+		--from-literal=POSTGRES_USER="$(DB_USER)" \
+		--from-literal=POSTGRES_PASSWORD="$(DB_PASSWORD)" \
+		--namespace=$(NAMESPACE) \
+		--dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ Secrets configured"
 
-migrate: ## Run database migrations
-	docker-compose run --rm bais-api python -m alembic upgrade head
+# ============================================================================
+# Infrastructure Setup - Phase 2: Database
+# ============================================================================
 
-backup: ## Create database backup
-	./scripts/backup.sh
+setup-postgres: ## Deploy PostgreSQL database
+	@echo "Deploying PostgreSQL..."
+	@kubectl apply -f infrastructure/database/postgresql.yaml
+	@kubectl wait --for=condition=ready pod \
+		-l app=postgres-primary \
+		-n $(NAMESPACE) \
+		--timeout=300s
+	@echo "✓ PostgreSQL deployed"
 
-restore: ## Restore database (usage: make restore BACKUP=filename.sql.gz)
-	./scripts/restore.sh $(BACKUP)
+init-database: ## Initialize database schema
+	@echo "Initializing database..."
+	@kubectl run migration-job \
+		--image=bais/api:$(VERSION) \
+		--restart=Never \
+		--namespace=$(NAMESPACE) \
+		--command -- alembic upgrade head
+	@kubectl wait --for=condition=complete job/migration-job \
+		-n $(NAMESPACE) --timeout=300s
+	@kubectl delete job migration-job -n $(NAMESPACE)
+	@echo "✓ Database initialized"
 
-deploy: ## Deploy to production
-	./scripts/deploy.sh
+# ============================================================================
+# Infrastructure Setup - Phase 3: Cache (Redis)
+# ============================================================================
 
-status: ## Check service status
-	docker-compose ps
-	docker-compose exec bais-api curl -f http://localhost:8000/health
-	docker-compose exec oauth-server curl -f http://localhost:8003/oauth/.well-known/authorization_server
+setup-redis: ## Deploy Redis cluster
+	@echo "Deploying Redis cluster..."
+	@kubectl apply -f infrastructure/cache/redis-cluster.yaml
+	@kubectl wait --for=condition=ready pod \
+		-l app=redis-cluster \
+		-n $(NAMESPACE) \
+		--timeout=300s
+	@echo "✓ Redis cluster deployed"
 
-monitor: ## Open monitoring dashboard
-	open http://localhost:3001
+# ============================================================================
+# Infrastructure Setup - Phase 4: Application
+# ============================================================================
+
+build-image: ## Build Docker image
+	@echo "Building application image..."
+	@docker build -t bais/api:$(VERSION) \
+		-f infrastructure/docker/Dockerfile .
+	@echo "✓ Image built: bais/api:$(VERSION)"
+
+deploy-app: ## Deploy application to Kubernetes
+	@echo "Deploying application..."
+	@kubectl apply -f infrastructure/k8s/deployment.yaml
+	@kubectl apply -f infrastructure/k8s/service.yaml
+	@kubectl apply -f infrastructure/k8s/ingress.yaml
+	@kubectl wait --for=condition=available \
+		deployment/bais-api \
+		-n $(NAMESPACE) \
+		--timeout=300s
+	@echo "✓ Application deployed"
+
+# ============================================================================
+# Complete Setup Workflows
+# ============================================================================
+
+setup-foundation: check-tools set-context create-namespaces setup-secrets ## Setup foundation
+	@echo "✓ Foundation setup complete"
+
+setup-database-stack: setup-postgres init-database ## Setup complete database stack
+	@echo "✓ Database stack ready"
+
+setup-cache-stack: setup-redis ## Setup complete cache stack
+	@echo "✓ Cache stack ready"
+
+setup-app-stack: build-image deploy-app ## Setup complete application stack
+	@echo "✓ Application stack ready"
+
+# ============================================================================
+# Main Setup Target (Complete Infrastructure)
+# ============================================================================
+
+setup: check-tools check-env ## Complete infrastructure setup (all phases)
+	@echo "=========================================="
+	@echo "Starting Complete Infrastructure Setup"
+	@echo "=========================================="
+	@$(MAKE) setup-foundation
+	@$(MAKE) setup-database-stack
+	@$(MAKE) setup-cache-stack
+	@$(MAKE) setup-app-stack
+	@echo ""
+	@echo "=========================================="
+	@echo "Infrastructure Setup Complete!"
+	@echo "=========================================="
+
+# ============================================================================
+# Status & Information
+# ============================================================================
+
+status: ## Show infrastructure status
+	@echo "=== Application Status ==="
+	@kubectl get pods -n $(NAMESPACE)
+	@echo ""
+	@echo "=== Services ==="
+	@kubectl get svc -n $(NAMESPACE)
+
+info: ## Display cluster information
+	@echo "Kubernetes Context: $(shell kubectl config current-context)"
+	@echo "Namespace: $(NAMESPACE)"
+	@echo "Version: $(VERSION)"

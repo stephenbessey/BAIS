@@ -1,0 +1,385 @@
+# ============================================================================
+# BAIS Platform - PostgreSQL 15+ Production Database Configuration
+# Best practices: Single Responsibility, Clear Intent, Maintainable
+# ============================================================================
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-config
+  namespace: bais-production
+data:
+  POSTGRES_DB: bais_production
+  POSTGRES_MAX_CONNECTIONS: "1000"
+  POSTGRES_SHARED_BUFFERS: "4GB"
+  POSTGRES_EFFECTIVE_CACHE_SIZE: "12GB"
+  POSTGRES_MAINTENANCE_WORK_MEM: "1GB"
+  POSTGRES_CHECKPOINT_COMPLETION_TARGET: "0.9"
+  POSTGRES_WAL_BUFFERS: "16MB"
+  POSTGRES_DEFAULT_STATISTICS_TARGET: "100"
+  POSTGRES_RANDOM_PAGE_COST: "1.1"
+  POSTGRES_EFFECTIVE_IO_CONCURRENCY: "200"
+  POSTGRES_WORK_MEM: "10MB"
+  POSTGRES_MIN_WAL_SIZE: "2GB"
+  POSTGRES_MAX_WAL_SIZE: "8GB"
+  POSTGRES_LOG_STATEMENT: "all"
+  POSTGRES_LOG_MIN_DURATION_STATEMENT: "1000"
+  POSTGRES_LOG_CHECKPOINTS: "on"
+  POSTGRES_LOG_CONNECTIONS: "on"
+  POSTGRES_LOG_DISCONNECTIONS: "on"
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: bais-production
+  labels:
+    app: postgres-primary
+    component: database
+spec:
+  serviceName: postgres-service
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+        component: database
+    spec:
+      securityContext:
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+      containers:
+      - name: postgres
+        image: postgres:15.4-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        - containerPort: 9187
+          name: metrics
+        envFrom:
+        - configMapRef:
+            name: postgres-config
+        - secretRef:
+            name: postgres-secrets
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+        - name: postgres-config
+          mountPath: /etc/postgresql/postgresql.conf
+          subPath: postgresql.conf
+        - name: postgres-init
+          mountPath: /docker-entrypoint-initdb.d
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "2000m"
+          limits:
+            memory: "8Gi"
+            cpu: "4000m"
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - $(POSTGRES_USER)
+            - -d
+            - $(POSTGRES_DB)
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 999
+          runAsGroup: 999
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: postgres-config
+        configMap:
+          name: postgres-config
+      - name: postgres-init
+        configMap:
+          name: postgres-init
+  volumeClaimTemplates:
+  - metadata:
+      name: postgres-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 100Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: bais-production
+  labels:
+    app: postgres-primary
+spec:
+  selector:
+    app: postgres-primary
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: 5432
+  - name: metrics
+    port: 9187
+    targetPort: 9187
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: bais-production
+data:
+  01-init.sql: |
+     -- Enable required extensions
+     CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+     CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+     CREATE EXTENSION IF NOT EXISTS "pg_trgm";
+     CREATE EXTENSION IF NOT EXISTS "btree_gin";
+     
+     -- Create database user for application
+     DO
+     $do$
+     BEGIN
+        IF NOT EXISTS (
+           SELECT FROM pg_catalog.pg_roles
+           WHERE rolname = 'bais_app_user') THEN
+           
+           CREATE ROLE bais_app_user LOGIN PASSWORD 'changeme';
+           GRANT CONNECT ON DATABASE bais_production TO bais_app_user;
+           GRANT USAGE ON SCHEMA public TO bais_app_user;
+           GRANT CREATE ON SCHEMA public TO bais_app_user;
+        END IF;
+     END
+     $do$;
+     
+     -- Set up monitoring user
+     DO
+     $do$
+     BEGIN
+        IF NOT EXISTS (
+           SELECT FROM pg_catalog.pg_roles
+           WHERE rolname = 'postgres_exporter') THEN
+           
+           CREATE ROLE postgres_exporter LOGIN PASSWORD 'monitoring_password';
+           ALTER USER postgres_exporter SET SEARCH_PATH TO postgres_exporter,pg_catalog;
+           
+           -- Grant necessary permissions
+           GRANT pg_monitor TO postgres_exporter;
+           GRANT CONNECT ON DATABASE bais_production TO postgres_exporter;
+        END IF;
+     END
+     $do$;
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: bais-production
+  labels:
+    app: postgres-backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: postgres:15.4-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              
+              # Create backup directory
+              mkdir -p /backup
+              
+              # Generate backup filename with timestamp
+              BACKUP_FILE="bais-$(date +%Y%m%d-%H%M%S).sql.gz"
+              
+              # Create backup
+              echo "Starting backup: $BACKUP_FILE"
+              pg_dump \
+                -h postgres-service \
+                -U $POSTGRES_USER \
+                -d $POSTGRES_DB \
+                --verbose \
+                --no-password \
+                --format=custom \
+                --compress=9 \
+                --file="/backup/$BACKUP_FILE"
+              
+              # Verify backup
+              if [ -f "/backup/$BACKUP_FILE" ]; then
+                echo "Backup completed successfully: $BACKUP_FILE"
+                ls -lh "/backup/$BACKUP_FILE"
+              else
+                echo "Backup failed!"
+                exit 1
+              fi
+              
+              # Clean up old backups (keep last 7 days)
+              find /backup -name "bais-*.sql.gz" -mtime +7 -delete
+              echo "Old backups cleaned up"
+              
+            env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: bais_production
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            volumeMounts:
+            - name: backup-storage
+              mountPath: /backup
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "100m"
+              limits:
+                memory: "1Gi"
+                cpu: "500m"
+          volumes:
+          - name: backup-storage
+            persistentVolumeClaim:
+              claimName: postgres-backup-pvc
+          restartPolicy: OnFailure
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-backup-pvc
+  namespace: bais-production
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 50Gi
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-maintenance
+  namespace: bais-production
+  labels:
+    app: postgres-maintenance
+spec:
+  schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: maintenance
+            image: postgres:15.4-alpine
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              
+              echo "Starting PostgreSQL maintenance..."
+              
+              # Connect to database and run maintenance
+              psql -h postgres-service -U $POSTGRES_USER -d $POSTGRES_DB <<EOF
+              
+              -- Update table statistics
+              ANALYZE;
+              
+              -- Vacuum all tables
+              VACUUM ANALYZE;
+              
+              -- Reindex if needed (check for bloated indexes)
+              SELECT schemaname, tablename, attname, n_tup_ins, n_tup_upd, n_tup_del, n_live_tup, n_dead_tup
+              FROM pg_stat_user_tables
+              WHERE n_dead_tup > n_live_tup * 0.1
+              ORDER BY n_dead_tup DESC;
+              
+              -- Clean up old pg_stat_statements entries
+              SELECT pg_stat_statements_reset();
+              
+              -- Log maintenance completion
+              SELECT 'Maintenance completed at ' || now() as status;
+              
+              EOF
+              
+              echo "PostgreSQL maintenance completed successfully"
+              
+            env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              value: bais_production
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secrets
+                  key: POSTGRES_PASSWORD
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "200m"
+          restartPolicy: OnFailure

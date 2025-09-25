@@ -1,0 +1,318 @@
+# ============================================================================
+# BAIS Platform - Kubernetes Deployment Configuration
+# Best practices: Clear Configuration, Resource Management, Health Checks
+# ============================================================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bais-api
+  namespace: bais-production
+  labels:
+    app: bais-api
+    version: v1
+    component: application
+spec:
+  replicas: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: bais-api
+  template:
+    metadata:
+      labels:
+        app: bais-api
+        version: v1
+        component: application
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - bais-api
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: bais-api
+        image: bais/api:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+          name: http
+        - containerPort: 9090
+          protocol: TCP
+          name: metrics
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: bais-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: bais-secrets
+              key: redis-url
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: bais-secrets
+              key: secret-key
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: WORKERS
+          value: "4"
+        - name: TIMEOUT
+          value: "120"
+        - name: KEEPALIVE
+          value: "5"
+        - name: MAX_REQUESTS
+          value: "1000"
+        - name: MAX_REQUESTS_JITTER
+          value: "100"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+            ephemeral-storage: "1Gi"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+            ephemeral-storage: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+          successThreshold: 1
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+          successThreshold: 1
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: app-logs
+          mountPath: /app/logs
+        - name: app-tmp
+          mountPath: /app/tmp
+        - name: app-config
+          mountPath: /app/config
+          readOnly: true
+        - name: app-secrets
+          mountPath: /app/secrets
+          readOnly: true
+      volumes:
+      - name: app-logs
+        emptyDir: {}
+      - name: app-tmp
+        emptyDir: {}
+      - name: app-config
+        configMap:
+          name: bais-config
+      - name: app-secrets
+        secret:
+          secretName: bais-secrets
+          defaultMode: 0400
+      imagePullSecrets:
+      - name: registry-credentials
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bais-config
+  namespace: bais-production
+  labels:
+    app: bais-api
+data:
+  app.conf: |
+    # Application Configuration
+    [app]
+    name = "BAIS Platform"
+    version = "1.0.0"
+    debug = false
+    
+    [server]
+    host = "0.0.0.0"
+    port = 8000
+    workers = 4
+    timeout = 120
+    keepalive = 5
+    
+    [logging]
+    level = "INFO"
+    format = "json"
+    file = "/app/logs/app.log"
+    max_size = "100MB"
+    max_age = 30
+    max_backups = 10
+    compress = true
+    
+    [metrics]
+    enabled = true
+    port = 9090
+    path = "/metrics"
+    
+    [security]
+    cors_origins = ["https://api.bais.io", "https://app.bais.io"]
+    rate_limit = 1000
+    rate_limit_window = 60
+    
+    [cache]
+    ttl = 300
+    max_size = 1000
+    
+    [database]
+    pool_size = 20
+    max_overflow = 40
+    pool_timeout = 30
+    pool_recycle = 3600
+    
+    [redis]
+    max_connections = 50
+    socket_timeout = 5
+    socket_connect_timeout = 5
+    retry_on_timeout = true
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bais-api-pdb
+  namespace: bais-production
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: bais-api
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: bais-health-check
+  namespace: bais-production
+  labels:
+    app: bais-health-check
+spec:
+  schedule: "*/5 * * * *"  # Every 5 minutes
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: health-check
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              
+              echo "Starting health check..."
+              
+              # Get service endpoint
+              API_URL="http://bais-api-service:8000"
+              
+              # Check health endpoint
+              echo "Checking health endpoint..."
+              if curl -f -s "$API_URL/health" > /dev/null; then
+                echo "✓ Health check passed"
+              else
+                echo "✗ Health check failed"
+                exit 1
+              fi
+              
+              # Check readiness endpoint
+              echo "Checking readiness endpoint..."
+              if curl -f -s "$API_URL/ready" > /dev/null; then
+                echo "✓ Readiness check passed"
+              else
+                echo "✗ Readiness check failed"
+                exit 1
+              fi
+              
+              # Check metrics endpoint
+              echo "Checking metrics endpoint..."
+              if curl -f -s "$API_URL/metrics" > /dev/null; then
+                echo "✓ Metrics endpoint accessible"
+              else
+                echo "✗ Metrics endpoint not accessible"
+                exit 1
+              fi
+              
+              echo "All health checks passed successfully"
+              
+            resources:
+              requests:
+                memory: "64Mi"
+                cpu: "50m"
+              limits:
+                memory: "128Mi"
+                cpu: "100m"
+          restartPolicy: OnFailure
