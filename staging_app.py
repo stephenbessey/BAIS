@@ -16,9 +16,17 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 
 from fastapi import FastAPI, HTTPException, Depends, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
+
+# Metrics imports
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    METRICS_ENABLED = True
+except ImportError:
+    METRICS_ENABLED = False
+
 import redis
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -147,6 +155,60 @@ app = FastAPI(
     description="Business Automation Integration Service - Staging Environment",
     version="1.0.0"
 )
+
+# ============================================================================
+# Prometheus Metrics (if enabled)
+# ============================================================================
+if METRICS_ENABLED:
+    # HTTP request metrics
+    http_requests_total = Counter(
+        'http_requests_total',
+        'Total HTTP requests',
+        ['method', 'endpoint', 'status']
+    )
+    
+    http_request_duration_seconds = Histogram(
+        'http_request_duration_seconds',
+        'HTTP request duration in seconds',
+        ['method', 'endpoint'],
+        buckets=[0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+    )
+    
+    # Business metrics
+    payment_processing_total = Counter(
+        'payment_processing_total',
+        'Total payment processing attempts',
+        ['status']
+    )
+    
+    user_registrations_total = Counter(
+        'user_registrations_total',
+        'Total user registrations'
+    )
+    
+    webhook_delivery_total = Counter(
+        'webhook_delivery_total',
+        'Total webhook deliveries',
+        ['status']
+    )
+    
+    # Authentication metrics
+    auth_failures_total = Counter(
+        'auth_failures_total',
+        'Total authentication failures'
+    )
+    
+    # Rate limiting metrics
+    rate_limit_exceeded_total = Counter(
+        'rate_limit_exceeded_total',
+        'Total rate limit violations'
+    )
+    
+    # Active sessions
+    auth_active_sessions = Gauge(
+        'auth_active_sessions',
+        'Number of active user sessions'
+    )
 
 security = HTTPBearer()
 
@@ -515,6 +577,20 @@ async def reset_rate_limit():
     global request_counts
     request_counts.clear()
     return {"message": "Rate limit reset", "timestamp": time.time()}
+
+# ============================================================================
+# Metrics Endpoint
+# ============================================================================
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint"""
+    if METRICS_ENABLED:
+        return Response(
+            generate_latest(),
+            media_type=CONTENT_TYPE_LATEST
+        )
+    else:
+        return {"message": "Metrics not enabled"}
 
 # ============================================================================
 # Error Handling

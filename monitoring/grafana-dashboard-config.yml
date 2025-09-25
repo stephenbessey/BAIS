@@ -1,0 +1,21 @@
+# ============================================================================
+# BAIS Platform - Grafana Dashboard Configuration
+# Local Monitoring Preview Setup
+# ============================================================================
+
+apiVersion: 1
+
+providers:
+  # ============================================================================
+  # Dashboard Provider Configuration
+  # ============================================================================
+  - name: 'default'
+    orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

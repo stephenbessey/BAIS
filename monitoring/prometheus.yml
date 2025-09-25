@@ -1,52 +1,108 @@
+# ============================================================================
+# BAIS Platform - Prometheus Configuration
+# Local Monitoring Preview Setup
+# ============================================================================
+
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
-rule_files:
-  - "alert_rules.yml"
-
+# Alertmanager configuration
 alerting:
   alertmanagers:
     - static_configs:
         - targets:
           - alertmanager:9093
 
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "/etc/prometheus/alert-rules.yaml"
+
+# Scrape configuration
 scrape_configs:
-  # BAIS Backend Metrics
-  - job_name: 'bais-backend'
+  # ============================================================================
+  # Prometheus self-monitoring
+  # ============================================================================
+  - job_name: 'prometheus'
     static_configs:
-      - targets: ['bais-backend:8000']
-    metrics_path: /metrics
+      - targets: ['localhost:9090']
+
+  # ============================================================================
+  # BAIS Application Metrics
+  # ============================================================================
+  - job_name: 'bais-application'
+    static_configs:
+      - targets: ['bais-app-monitoring:9090']
     scrape_interval: 15s
     scrape_timeout: 10s
-
-  # AP2 Webhook Processor Metrics
-  - job_name: 'ap2-webhook-processor'
-    static_configs:
-      - targets: ['ap2-webhook-processor:8001']
     metrics_path: /metrics
-    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'bais-app-monitoring:9090'
 
-  # Database Metrics
-  - job_name: 'postgres'
-    static_configs:
-      - targets: ['postgres-exporter:9187']
-    scrape_interval: 30s
-
-  # Redis Metrics
-  - job_name: 'redis'
-    static_configs:
-      - targets: ['redis-exporter:9121']
-    scrape_interval: 30s
-
-  # System Metrics
+  # ============================================================================
+  # Node Exporter - Infrastructure Metrics
+  # ============================================================================
   - job_name: 'node-exporter'
     static_configs:
-      - targets: ['node-exporter:9100']
-    scrape_interval: 30s
+      - targets: ['node-exporter:9100', 'metrics-generator:9100']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: '${1}'
 
-  # Nginx Metrics
-  - job_name: 'nginx'
+  # ============================================================================
+  # PostgreSQL Exporter - Database Metrics
+  # ============================================================================
+  - job_name: 'postgres-exporter'
     static_configs:
-      - targets: ['nginx-exporter:9113']
-    scrape_interval: 30s
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'postgres-staging'
+
+  # ============================================================================
+  # Redis Exporter - Cache Metrics
+  # ============================================================================
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'redis-staging'
+
+  # ============================================================================
+  # Alertmanager - Alert Manager Metrics
+  # ============================================================================
+  - job_name: 'alertmanager'
+    static_configs:
+      - targets: ['alertmanager:9093']
+    scrape_interval: 15s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'alertmanager:9093'
+
+  # ============================================================================
+  # Grafana - Dashboard Metrics
+  # ============================================================================
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    scrape_interval: 15s
+    metrics_path: /metrics
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        replacement: 'grafana:3000'
+
+# ============================================================================
+# Recording Rules for Performance Optimization
+# ============================================================================
+# Rule files are already defined above in the global section

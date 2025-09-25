@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Prometheus - Metrics Collection and Storage
+  # ============================================================================
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: bais-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./scripts/prometheus-alerts.yaml:/etc/prometheus/alert-rules.yaml:ro
+      - ./monitoring/prometheus-simple.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================================
+  # Grafana - Visualization and Dashboards
+  # ============================================================================
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: bais-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=bais-admin-2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./scripts/grafana-dashboard-bais.json:/etc/grafana/provisioning/dashboards/bais-dashboard.json:ro
+      - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./monitoring/grafana-dashboard-config.yml:/etc/grafana/provisioning/dashboards/dashboard-config.yml:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ============================================================================
+  # Alertmanager - Alert Routing and Notifications
+  # ============================================================================
+  alertmanager:
+    image: prom/alertmanager:v0.25.0
+    container_name: bais-alertmanager
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ============================================================================
+  # Node Exporter - Infrastructure Metrics
+  # ============================================================================
+  node-exporter:
+    image: prom/node-exporter:v1.6.1
+    container_name: bais-node-exporter
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+  # ============================================================================
+  # Redis Exporter - Cache Metrics
+  # ============================================================================
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.52.0
+    container_name: bais-redis-exporter
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis-staging:6379
+    networks:
+      - monitoring
+      - staging
+    restart: unless-stopped
+
+  # ============================================================================
+  # PostgreSQL Exporter - Database Metrics
+  # ============================================================================
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.13.2
+    container_name: bais-postgres-exporter
+    ports:
+      - "9187:9187"
+    environment:
+      - DATA_SOURCE_NAME=postgresql://bais_staging_user:staging_password_123@postgres-staging:5432/bais_staging?sslmode=disable
+    networks:
+      - monitoring
+      - staging
+    restart: unless-stopped
+
+  # ============================================================================
+  # BAIS Application with Metrics Endpoint
+  # ============================================================================
+  bais-app-monitoring:
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+    container_name: bais-app-monitoring
+    ports:
+      - "8002:8000"
+      - "9092:9090"  # Metrics endpoint
+    environment:
+      - ENVIRONMENT=monitoring
+      - DATABASE_URL=postgresql://bais_staging_user:staging_password_123@postgres-staging:5432/bais_staging
+      - REDIS_URL=redis://redis-staging:6379
+      - METRICS_ENABLED=true
+    volumes:
+      - ./staging_app.py:/app/main.py:ro
+    networks:
+      - monitoring
+      - staging
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+  # ============================================================================
+  # Mock Data Generator - Generate realistic metrics
+  # ============================================================================
+  metrics-generator:
+    image: prom/node-exporter:v1.6.1
+    container_name: bais-metrics-generator
+    ports:
+      - "9101:9100"
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
+
+networks:
+  monitoring:
+    driver: bridge
+  staging:
+    external: true

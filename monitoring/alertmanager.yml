@@ -1,0 +1,172 @@
+# ============================================================================
+# BAIS Platform - Alertmanager Configuration
+# Local Monitoring Preview Setup
+# ============================================================================
+
+global:
+  resolve_timeout: 5m
+  # Slack webhook URL (replace with your actual webhook)
+  slack_api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+
+# The root route on which each condition comes into effect.
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default-receiver'
+  routes:
+  # ============================================================================
+  # Critical Alerts - Immediate Action Required
+  # ============================================================================
+  - match:
+      severity: critical
+    receiver: 'critical-alerts'
+    continue: true
+  
+  # ============================================================================
+  # Warning Alerts - Investigation Required
+  # ============================================================================
+  - match:
+      severity: warning
+    receiver: 'warning-alerts'
+    continue: true
+  
+  # ============================================================================
+  # Security Alerts - Security Team
+  # ============================================================================
+  - match:
+      team: security
+    receiver: 'security-alerts'
+    continue: true
+  
+  # ============================================================================
+  # Business Alerts - Business Team
+  # ============================================================================
+  - match:
+      team: business
+    receiver: 'business-alerts'
+    continue: true
+
+# ============================================================================
+# Notification Receivers
+# ============================================================================
+receivers:
+# ----------------------------------------------------------------------------
+# Default Receiver - All Alerts
+# ----------------------------------------------------------------------------
+- name: 'default-receiver'
+  webhook_configs:
+  - url: 'http://localhost:9093/api/v1/alerts'
+    send_resolved: true
+
+# ----------------------------------------------------------------------------
+# Critical Alerts - High Priority
+# ----------------------------------------------------------------------------
+- name: 'critical-alerts'
+  webhook_configs:
+  - url: 'http://localhost:9093/api/v1/alerts'
+    send_resolved: true
+    title: '🚨 CRITICAL ALERT - BAIS Platform'
+    text: |
+      *Alert:* {{ .GroupLabels.alertname }}
+      *Severity:* {{ .CommonLabels.severity }}
+      *Component:* {{ .CommonLabels.component }}
+      *Summary:* {{ .CommonAnnotations.summary }}
+      *Description:* {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.action }}*Action:* {{ .CommonAnnotations.action }}{{ end }}
+      {{ if .CommonAnnotations.runbook_url }}*Runbook:* {{ .CommonAnnotations.runbook_url }}{{ end }}
+
+  # Email notification for critical alerts
+  email_configs:
+  - to: 'admin@bais.io'
+    subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+    body: |
+      Alert: {{ .GroupLabels.alertname }}
+      Severity: {{ .CommonLabels.severity }}
+      Component: {{ .CommonLabels.component }}
+      Summary: {{ .CommonAnnotations.summary }}
+      Description: {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.action }}Action: {{ .CommonAnnotations.action }}{{ end }}
+      {{ if .CommonAnnotations.runbook_url }}Runbook: {{ .CommonAnnotations.runbook_url }}{{ end }}
+
+# ----------------------------------------------------------------------------
+# Warning Alerts - Medium Priority
+# ----------------------------------------------------------------------------
+- name: 'warning-alerts'
+  webhook_configs:
+  - url: 'http://localhost:9093/api/v1/alerts'
+    send_resolved: true
+    title: '⚠️ Warning Alert - BAIS Platform'
+    text: |
+      *Alert:* {{ .GroupLabels.alertname }}
+      *Component:* {{ .CommonLabels.component }}
+      *Summary:* {{ .CommonAnnotations.summary }}
+      *Description:* {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.runbook_url }}*Runbook:* {{ .CommonAnnotations.runbook_url }}{{ end }}
+
+# ----------------------------------------------------------------------------
+# Security Alerts - Security Team
+# ----------------------------------------------------------------------------
+- name: 'security-alerts'
+  webhook_configs:
+  - url: 'http://localhost:9093/api/v1/alerts'
+    send_resolved: true
+    title: '🔒 Security Alert - BAIS Platform'
+    text: |
+      *Alert:* {{ .GroupLabels.alertname }}
+      *Severity:* {{ .CommonLabels.severity }}
+      *Summary:* {{ .CommonAnnotations.summary }}
+      *Description:* {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.action }}*Action:* {{ .CommonAnnotations.action }}{{ end }}
+
+  # Email to security team
+  email_configs:
+  - to: 'security@baintegrate.com'
+    subject: '🔒 Security Alert: {{ .GroupLabels.alertname }}'
+    body: |
+      Alert: {{ .GroupLabels.alertname }}
+      Severity: {{ .CommonLabels.severity }}
+      Summary: {{ .CommonAnnotations.summary }}
+      Description: {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.action }}Action: {{ .CommonAnnotations.action }}{{ end }}
+
+# ----------------------------------------------------------------------------
+# Business Alerts - Business Team
+# ----------------------------------------------------------------------------
+- name: 'business-alerts'
+  webhook_configs:
+  - url: 'http://localhost:9093/api/v1/alerts'
+    send_resolved: true
+    title: '💼 Business Alert - BAIS Platform'
+    text: |
+      *Alert:* {{ .GroupLabels.alertname }}
+      *Component:* {{ .CommonLabels.component }}
+      *Summary:* {{ .CommonAnnotations.summary }}
+      *Description:* {{ .CommonAnnotations.description }}
+      {{ if .CommonAnnotations.impact }}*Impact:* {{ .CommonAnnotations.impact }}{{ end }}
+
+# ============================================================================
+# Inhibition Rules - Prevent Alert Spam
+# ============================================================================
+inhibit_rules:
+# Inhibit warning alerts when critical alerts are firing
+- source_match:
+    severity: 'critical'
+  target_match:
+    severity: 'warning'
+  equal: ['alertname', 'instance']
+
+# Inhibit individual pod alerts when node is down
+- source_match:
+    alertname: 'NodeNotReady'
+  target_match_re:
+    alertname: 'PodNotReady|PodCrashLooping'
+  equal: ['instance']
+
+# Inhibit service alerts when infrastructure is down
+- source_match:
+    alertname: 'HighCPUUsage'
+  target_match_re:
+    alertname: 'HighResponseTime|HighErrorRate'
+  equal: ['instance']
