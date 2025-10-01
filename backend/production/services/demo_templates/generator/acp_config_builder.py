@@ -16,9 +16,10 @@ from pydantic import BaseModel, Field
 
 from ...core.bais_schema_validator import BAISBusinessSchema
 from ..scraper.website_analyzer import BusinessIntelligence, Service
-from ..commerce.acp_integration_service import (
-    CheckoutConfiguration, PaymentMethod, PaymentTiming, 
-    TaxConfig, ReturnsPolicy, ShippingOption, Money
+from ..commerce.acp_official_compliance import (
+    ACPCheckoutSession, ACPOrder, ACPProduct, ACPMoney,
+    ACPPaymentMethod, ACPOrderStatus, ACPWebhookEvent,
+    OfficialACPIntegrationService
 )
 
 
