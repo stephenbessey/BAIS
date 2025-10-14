@@ -1,0 +1,9 @@
+package.json
+package-lock.json
+node_modules/
+frontend/
+aioneadvertising-mcp/
+backend/src/
+backend/node_modules/
+backend/package.json
+backend/package-lock.json
