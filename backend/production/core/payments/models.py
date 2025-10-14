@@ -1,3 +1,4 @@
+from pydantic import BaseModel, Field
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from datetime import datetime
@@ -148,3 +149,13 @@ class VerifiableCredential:
     proof: Dict[str, Any]
     created_at: datetime
     expires_at: Optional[datetime] = None
+
+
+class BusinessIntent(BaseModel):
+    """Business intent for payment processing"""
+    business_id: str
+    intent_type: str
+    amount: Optional[float] = None
+    currency: str = "USD"
+    description: Optional[str] = None
+    metadata: Dict[str, Any] = {}

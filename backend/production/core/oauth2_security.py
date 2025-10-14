@@ -31,7 +31,7 @@ class OAuth2ClientCredentials(BaseModel):
     response_types: List[str] = Field(default=["code"])
 
 class OAuth2AuthorizationRequest(BaseModel):
-    response_type: str = Field(..., regex="^(code|token)$")
+    response_type: str = Field(..., pattern="^(code|token)$")
     client_id: str = Field(..., min_length=10)
     redirect_uri: str = Field(...)
     scope: Optional[str] = Field(None)
@@ -39,7 +39,7 @@ class OAuth2AuthorizationRequest(BaseModel):
     business_id: Optional[str] = Field(None)
 
 class OAuth2TokenRequest(BaseModel):
-    grant_type: str = Field(..., regex="^(authorization_code|client_credentials|refresh_token)$")
+    grant_type: str = Field(..., pattern="^(authorization_code|client_credentials|refresh_token)$")
     code: Optional[str] = Field(None)
     redirect_uri: Optional[str] = Field(None)
     client_id: str = Field(...)

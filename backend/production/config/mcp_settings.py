@@ -416,7 +416,7 @@ class SecurityConfigModel(BaseModel):
     max_json_payload_size_kb: int = Field(default=100, ge=1, le=10000, description="Maximum JSON payload size in KB")
     max_string_length: int = Field(default=1000, ge=10, le=10000, description="Maximum string length")
     jwt_secret_key: str = Field(..., min_length=32, description="JWT secret key")
-    jwt_algorithm: str = Field(default="HS256", regex="^(HS256|HS384|HS512|RS256|RS384|RS512)$", description="JWT algorithm")
+    jwt_algorithm: str = Field(default="HS256", pattern="^(HS256|HS384|HS512|RS256|RS384|RS512)$", description="JWT algorithm")
     jwt_access_token_expire_minutes: int = Field(default=30, ge=1, le=1440, description="JWT access token expire time in minutes")
     jwt_refresh_token_expire_days: int = Field(default=7, ge=1, le=365, description="JWT refresh token expire time in days")
     

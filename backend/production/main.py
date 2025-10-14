@@ -49,31 +49,34 @@ class BAISApplicationFactory:
 	@staticmethod
 	def _configure_routes(app: FastAPI) -> None:
 		"""Configure application routes"""
+		# Root and health endpoints
+		@app.get("/")
+		def root():
+			return {"message": "BAIS Production Server is running"}
+		
+		@app.get("/health")
+		def health_check():
+			return {"status": "healthy", "service": "BAIS Production Server"}
+		
+		# API routes
 		app.include_router(api_router, prefix="/api/v1")
+		
 		# A2A protocol routes
 		app.include_router(a2a_discovery_router, tags=["A2A Discovery"])
 		app.include_router(a2a_tasks_router, tags=["A2A Tasks"])
 		app.include_router(a2a_sse_router, tags=["A2A SSE"])
 		
-	@app.get("/")
-	def root():
-		return {"message": "BAIS Production Server is running"}
-	
-	@app.get("/health")
-	def health_check():
-		return {"status": "healthy", "service": "BAIS Production Server"}
-	
-	# MCP SSE transport routes
-	app.include_router(mcp_sse_router, tags=["MCP SSE"])
-	
-	# MCP Prompts primitive routes
-	app.include_router(mcp_prompts_router, tags=["MCP Prompts"])
-	
-	# MCP Subscription management routes
-	app.include_router(mcp_subscription_router, tags=["MCP Subscriptions"])
-	
-	# Unified error handling routes
-	app.include_router(unified_error_router, tags=["Unified Error Handling"])
+		# MCP SSE transport routes
+		app.include_router(mcp_sse_router, tags=["MCP SSE"])
+		
+		# MCP Prompts primitive routes
+		app.include_router(mcp_prompts_router, tags=["MCP Prompts"])
+		
+		# MCP Subscription management routes
+		app.include_router(mcp_subscription_router, tags=["MCP Subscriptions"])
+		
+		# Unified error handling routes
+		app.include_router(unified_error_router, tags=["Unified Error Handling"])
 
 
 # Create application instance

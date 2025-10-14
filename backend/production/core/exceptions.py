@@ -260,3 +260,47 @@ def convert_to_http_exception(exc: BAISException) -> HTTPException:
                 "details": exc.details
             }
         )
+
+class BusinessNotFoundError(Exception):
+    """Raised when a business is not found"""
+    pass
+
+class BusinessValidationError(Exception):
+    """Raised when business validation fails"""
+    pass
+
+class BusinessRegistrationError(Exception):
+    """Raised when business registration fails"""
+    pass
+
+
+# Business-related exceptions
+class BusinessNotFoundError(Exception):
+    """Raised when a business is not found"""
+    pass
+
+class BusinessValidationError(Exception):
+    """Raised when business validation fails"""
+    pass
+
+class BusinessRegistrationError(Exception):
+    """Raised when business registration fails"""
+    pass
+
+
+# Additional exceptions for business logic
+class NotFoundError(Exception):
+    """Raised when a resource is not found"""
+    pass
+
+class ValidationError(Exception):
+    """Raised when validation fails"""
+    pass
+
+class AuthenticationError(Exception):
+    """Raised when authentication fails"""
+    pass
+
+class AuthorizationError(Exception):
+    """Raised when authorization fails"""
+    pass

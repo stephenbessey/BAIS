@@ -45,12 +45,12 @@ class A2ATaskRequest(BaseModel):
     capability: str = Field(..., description="Requested capability")
     input: Dict[str, Any] = Field(..., description="Task input data")
     timeout_seconds: int = Field(default=30)
-    priority: str = Field(default="normal", regex="^(low|normal|high|urgent)$")
+    priority: str = Field(default="normal", pattern="^(low|normal|high|urgent)$")
     callback_url: Optional[str] = Field(None, description="Callback URL for async tasks")
 
 class A2ATaskStatus(BaseModel):
     task_id: str
-    status: str = Field(..., regex="^(pending|running|completed|failed|cancelled)$")
+    status: str = Field(..., pattern="^(pending|running|completed|failed|cancelled)$")
     progress: float = Field(default=0.0, ge=0.0, le=100.0)
     message: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

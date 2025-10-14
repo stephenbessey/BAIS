@@ -4,7 +4,7 @@ from datetime import datetime
 
 class BusinessRegistrationRequest(BaseModel):
     business_name: str = Field(..., min_length=1, max_length=255, description="The official name of the business.")
-    business_type: str = Field(..., regex="^(hospitality|food_service|retail|healthcare|finance)$", description="The category of the business.")
+    business_type: str = Field(..., pattern="^(hospitality|food_service|retail|healthcare|finance)$", description="The category of the business.")
     contact_info: Dict[str, str] = Field(..., description="Contact details like website, phone, and email.")
     location: Dict[str, Any] = Field(..., description="Physical location information of the business.")
     services_config: List[Dict[str, Any]] = Field(..., min_items=1, description="A list of services offered by the business.")
@@ -38,7 +38,7 @@ class BusinessStatusResponse(BaseModel):
 class AgentInteractionRequest(BaseModel):
     business_id: str
     agent_id: str
-    interaction_type: str = Field(..., regex="^(search|book|modify|cancel|info)$")
+    interaction_type: str = Field(..., pattern="^(search|book|modify|cancel|info)$")
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 class AgentInteractionResponse(BaseModel):

@@ -9,6 +9,8 @@ export class AgentController {
     constructor() {
         this.ollamaService = new OllamaService();
         this.promptService = new PromptService();
+        // Universal AI router will be initialized when needed
+        this.universalAIRouter = null;
     }
 
     async processChat(req, res, next) {
@@ -18,26 +20,51 @@ export class AgentController {
                 return this.sendValidationError(res, errors.array());
             }
 
-            const { prompt, businessType, requestType, userPreferences } = req.body;
+            const { prompt, businessType, requestType, userPreferences, aiProvider, model } = req.body;
             
-            logger.info(`Processing BAIS agent request for business type: ${businessType}`);
+            logger.info(`Processing BAIS agent request for business type: ${businessType} with provider: ${aiProvider || 'auto'}`);
             
-            const baisPrompt = this.promptService.buildBAISPrompt({
-                prompt,
-                businessType,
-                requestType,
-                userPreferences
-            });
-            
-            const response = await this.ollamaService.sendChatMessage(baisPrompt);
+            // Try universal AI router first, fallback to Ollama
+            let response;
+            try {
+                if (this.universalAIRouter) {
+                    response = await this.universalAIRouter.processRequest({
+                        prompt,
+                        businessType,
+                        requestType,
+                        userPreferences,
+                        provider: aiProvider,
+                        model
+                    });
+                } else {
+                    // Fallback to Ollama service
+                    const baisPrompt = this.promptService.buildBAISPrompt({
+                        prompt,
+                        businessType,
+                        requestType,
+                        userPreferences
+                    });
+                    response = await this.ollamaService.sendChatMessage(baisPrompt);
+                }
+            } catch (aiError) {
+                logger.warn(`Universal AI router failed, falling back to Ollama: ${aiError.message}`);
+                const baisPrompt = this.promptService.buildBAISPrompt({
+                    prompt,
+                    businessType,
+                    requestType,
+                    userPreferences
+                });
+                response = await this.ollamaService.sendChatMessage(baisPrompt);
+            }
             
             this.sendSuccessResponse(res, {
                 response: response.content,
                 metadata: {
-                    model: response.model,
+                    model: response.model || response.model_used,
                     businessType,
                     requestType,
                     processingTime: response.total_duration,
+                    aiProvider: response.ai_provider || 'ollama',
                     timestamp: new Date().toISOString()
                 }
             });

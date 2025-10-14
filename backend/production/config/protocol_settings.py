@@ -4,7 +4,8 @@ Implements best practices for configuration
 """
 
 from typing import Optional, List
-from pydantic import BaseSettings, Field, validator
+from pydantic_settings import BaseSettings
+from pydantic import Field, validator
 from dataclasses import dataclass
 import os
 

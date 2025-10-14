@@ -70,7 +70,7 @@ class A2AServerFactory:
     """
     
     def __init__(self):
-        self.created_servers: Dict[str, BAISMC2AServer] = {}
+        self.created_servers: Dict[str, BAISMCPServer] = {}
         self.streaming_managers: Dict[str, Any] = {}
     
     def create_server(
@@ -78,7 +78,7 @@ class A2AServerFactory:
         business_schema: Any,
         mcp_server: BAISMCPServer,
         enable_streaming: bool = True
-    ) -> BAISMC2AServer:
+    ) -> BAISMCPServer:
         """
         Create A2A server for business
         
@@ -91,7 +91,7 @@ class A2AServerFactory:
             Created A2A server
         """
         # Create A2A server
-        a2a_server = BAISMC2AServer(business_schema, mcp_server)
+        a2a_server = BAISMCPServer(business_schema, mcp_server)
         
         # Enable streaming if requested
         if enable_streaming:
@@ -103,7 +103,7 @@ class A2AServerFactory:
         
         return a2a_server
     
-    def get_server(self, business_id: str) -> Optional[BAISMC2AServer]:
+    def get_server(self, business_id: str) -> Optional[BAISMCPServer]:
         """Get existing A2A server by business ID"""
         return self.created_servers.get(business_id)
     
@@ -260,7 +260,7 @@ class BusinessServerOrchestrator:
     async def _register_with_a2a_registry(
         self, 
         business_schema: Any, 
-        a2a_server: BAISMC2AServer
+        a2a_server: BAISMCPServer
     ) -> None:
         """Register business with A2A agent registry"""
         try:
