@@ -385,6 +385,124 @@ class DatabaseManager:
     def close(self):
         """Close database connections"""
         self.engine.dispose()
+    
+    # Dashboard-specific methods
+    def get_business_by_id(self, business_id: str) -> Optional[Dict[str, Any]]:
+        """Get business by ID"""
+        session = self.get_session()
+        try:
+            business = session.query(Business).filter(Business.id == business_id).first()
+            if business:
+                return {
+                    'id': str(business.id),
+                    'name': business.name,
+                    'business_type': business.business_type,
+                    'category': business.business_type,  # Using business_type as category
+                    'status': business.status
+                }
+            return None
+        finally:
+            session.close()
+    
+    def get_all_businesses(self) -> List[Dict[str, Any]]:
+        """Get all businesses"""
+        session = self.get_session()
+        try:
+            businesses = session.query(Business).filter(Business.status == 'active').all()
+            return [
+                {
+                    'id': str(business.id),
+                    'name': business.name,
+                    'business_type': business.business_type,
+                    'category': business.business_type,
+                    'status': business.status
+                }
+                for business in businesses
+            ]
+        finally:
+            session.close()
+    
+    def get_business_transactions(self, business_id: str, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Get business transactions within date range"""
+        session = self.get_session()
+        try:
+            # Query agent interactions as transactions
+            interactions = session.query(AgentInteraction).filter(
+                AgentInteraction.business_id == business_id,
+                AgentInteraction.created_at >= start_date,
+                AgentInteraction.created_at <= end_date
+            ).all()
+            
+            transactions = []
+            for interaction in interactions:
+                # Extract amount from metadata if available
+                amount = 0
+                if interaction.metadata and 'amount' in interaction.metadata:
+                    amount = float(interaction.metadata['amount'])
+                
+                transactions.append({
+                    'id': str(interaction.id),
+                    'business_id': str(interaction.business_id),
+                    'user_id': str(interaction.user_id) if interaction.user_id else None,
+                    'amount': amount,
+                    'ai_provider': interaction.metadata.get('ai_provider', 'unknown') if interaction.metadata else 'unknown',
+                    'service_id': interaction.metadata.get('service_id') if interaction.metadata else None,
+                    'created_at': interaction.created_at.isoformat()
+                })
+            
+            return transactions
+        finally:
+            session.close()
+    
+    def get_all_transactions(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Get all transactions within date range"""
+        session = self.get_session()
+        try:
+            interactions = session.query(AgentInteraction).filter(
+                AgentInteraction.created_at >= start_date,
+                AgentInteraction.created_at <= end_date
+            ).all()
+            
+            transactions = []
+            for interaction in interactions:
+                amount = 0
+                if interaction.metadata and 'amount' in interaction.metadata:
+                    amount = float(interaction.metadata['amount'])
+                
+                transactions.append({
+                    'id': str(interaction.id),
+                    'business_id': str(interaction.business_id),
+                    'user_id': str(interaction.user_id) if interaction.user_id else None,
+                    'amount': amount,
+                    'ai_provider': interaction.metadata.get('ai_provider', 'unknown') if interaction.metadata else 'unknown',
+                    'created_at': interaction.created_at.isoformat()
+                })
+            
+            return transactions
+        finally:
+            session.close()
+    
+    def get_business_services(self, business_id: str) -> List[Dict[str, Any]]:
+        """Get business services"""
+        session = self.get_session()
+        try:
+            services = session.query(BusinessService).filter(
+                BusinessService.business_id == business_id,
+                BusinessService.enabled == True
+            ).all()
+            
+            return [
+                {
+                    'id': str(service.id),
+                    'name': service.name,
+                    'description': service.description,
+                    'category': service.category,
+                    'status': 'active' if service.enabled else 'inactive'
+                }
+                for service in services
+            ]
+        finally:
+            session.close()
 
 # Repository pattern for clean data access
 class BusinessRepository:

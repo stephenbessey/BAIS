@@ -10,6 +10,7 @@ from .config.settings import get_settings, get_database_url
 from .core.exceptions import ConfigurationError
 from .api.v1.payments.mandate_router import router as mandate_router
 from .api.v1.payments.transaction_router import router as transaction_router
+from .api.v1.dashboard_router import router as dashboard_router
 
 
 class DependencyContainer:
@@ -84,6 +85,9 @@ api_router = APIRouter()
 # Include AP2 payment routers
 api_router.include_router(mandate_router, prefix="/payments")
 api_router.include_router(transaction_router, prefix="/payments")
+
+# Include dashboard router
+api_router.include_router(dashboard_router, prefix="/api/v1")
 
 @api_router.post("/businesses", response_model=BusinessRegistrationResponse, tags=["Business Management"])
 async def register_business(
