@@ -22,6 +22,16 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
+# Add parent directory to path so imports work correctly
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+    
+# Add backend directory to path
+backend_dir = os.path.dirname(parent_dir)
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
 # Diagnostic information
 def get_system_info() -> Dict[str, Any]:
     """Get comprehensive system information for diagnostics"""
@@ -89,7 +99,13 @@ try:
     
     # Import and configure Universal LLM Integration
     try:
-        from api.v1.universal_webhooks import router as universal_webhook_router
+        # Add project root to path for proper imports
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        # Use absolute import from project root
+        from backend.production.api.v1.universal_webhooks import router as universal_webhook_router
         
         # Include universal webhook routes
         app.include_router(universal_webhook_router)
@@ -98,6 +114,7 @@ try:
     except ImportError as e:
         logger.warning(f"Could not import universal webhook routes: {e}")
         import_errors.append(f"Universal webhooks import error: {str(e)}")
+        logger.warning(f"Import error details: {traceback.format_exc()}")
     
     logger.info("Successfully created BAIS application with available routes")
     
