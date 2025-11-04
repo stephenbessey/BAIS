@@ -13,6 +13,7 @@ from .api.v1.mcp.sse_router import router as mcp_sse_router
 from .api.v1.mcp.prompts_router import router as mcp_prompts_router
 from .api.v1.mcp.subscription_router import router as mcp_subscription_router
 from .api.v1.errors.unified_error_router import router as unified_error_router
+from .api.v1.universal_webhooks import router as universal_webhook_router
 
 
 class BAISApplicationFactory:
@@ -77,6 +78,9 @@ class BAISApplicationFactory:
 		
 		# Unified error handling routes
 		app.include_router(unified_error_router, tags=["Unified Error Handling"])
+		
+		# Universal LLM webhook routes (for Claude, ChatGPT, Gemini)
+		app.include_router(universal_webhook_router, tags=["Universal LLM Integration"])
 
 
 # Create application instance
