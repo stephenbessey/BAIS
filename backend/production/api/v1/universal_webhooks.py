@@ -101,21 +101,21 @@ async def handle_claude_tool_use(
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
         
-        # Return in Claude's expected format
-        return {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id,
-            "content": json.dumps(result)
-        }
+        # Return in UniversalToolResponse format
+        return UniversalToolResponse(
+            success=True,
+            result=result,
+            timestamp=datetime.utcnow().isoformat()
+        )
         
     except Exception as e:
-        logger.error(f"Claude tool use error: {str(e)}")
-        return {
-            "type": "tool_result",
-            "tool_use_id": tool_use_id if 'tool_use_id' in locals() else "",
-            "is_error": True,
-            "content": f"Error: {str(e)}"
-        }
+        logger.error(f"Claude tool use error: {str(e)}", exc_info=True)
+        tool_use_id = tool_use_id if 'tool_use_id' in locals() else ""
+        return UniversalToolResponse(
+            success=False,
+            error=str(e),
+            timestamp=datetime.utcnow().isoformat()
+        )
 
 
 # ============================================================================
