@@ -5,6 +5,7 @@ Script to submit a customer business registration to the BAIS backend.
 
 import json
 import sys
+import os
 import re
 import requests
 from pathlib import Path
@@ -117,7 +118,8 @@ def main():
         sys.exit(1)
     
     customer_file = Path(sys.argv[1])
-    api_url = sys.argv[2] if len(sys.argv) > 2 else "http://localhost:8000"
+    # Default to Railway production URL, fallback to localhost
+    api_url = sys.argv[2] if len(sys.argv) > 2 else os.getenv("RAILWAY_URL") or os.getenv("BAIS_BASE_URL") or "http://localhost:8000"
     
     if not customer_file.exists():
         print(f"❌ Error: File not found: {customer_file}")

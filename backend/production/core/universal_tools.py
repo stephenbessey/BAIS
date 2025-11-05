@@ -224,45 +224,164 @@ class BAISUniversalToolHandler:
             # Search businesses - check database first, then fallback to mock data
             businesses = []
             
-            # Try to query database if available
+            # Try to query database if available - query ALL registered businesses
             try:
-                from ..core.database_models import DatabaseManager
-                db_manager = DatabaseManager()
-                with db_manager.get_session() as session:
-                    from ..core.database_models import Business
-                    query_obj = session.query(Business)
+                from ..core.database_models import DatabaseManager, Business, BusinessService
+                import os
+                
+                # Get database URL from environment
+                database_url = os.getenv("DATABASE_URL")
+                if database_url and database_url != "not_set":
+                    db_manager = DatabaseManager(database_url)
+                    with db_manager.get_session() as session:
+                        query_obj = session.query(Business).filter(Business.status == "active")
+                        
+                        # Apply search filters
+                        if query:
+                            # Search in name, description, and service names
+                            query_lower = query.lower()
+                            query_obj = query_obj.filter(
+                                (Business.name.ilike(f"%{query_lower}%")) |
+                                (Business.description.ilike(f"%{query_lower}%")) |
+                                # Also search in service names through relationships
+                                Business.services.any(
+                                    BusinessService.name.ilike(f"%{query_lower}%")
+                                )
+                            )
+                        
+                        if category:
+                            query_obj = query_obj.filter(Business.business_type == category)
+                        
+                        if location:
+                            location_lower = location.lower()
+                            query_obj = query_obj.filter(
+                                (Business.city.ilike(f"%{location_lower}%")) |
+                                (Business.state.ilike(f"%{location_lower}%"))
+                            )
+                        
+                        # Get matching businesses
+                        db_businesses = query_obj.limit(10).all()
+                        
+                        for biz in db_businesses:
+                            # Get services for this business
+                            services = session.query(BusinessService).filter(
+                                BusinessService.business_id == biz.id
+                            ).all()
+                            
+                            business_data = {
+                                "business_id": str(biz.id),
+                                "name": biz.name,
+                                "description": biz.description or "",
+                                "category": biz.business_type,
+                                "location": {
+                                    "city": biz.city or "",
+                                    "state": biz.state or "",
+                                    "address": f"{biz.address or ''}, {biz.city or ''}, {biz.state or ''}"
+                                },
+                                "phone": biz.phone or "",
+                                "website": biz.website or "",
+                                "rating": 4.5,  # Default rating, can be enhanced with metrics
+                                "services": [
+                                    {
+                                        "id": str(svc.id),
+                                        "name": svc.name,
+                                        "description": svc.description or ""
+                                    }
+                                    for svc in services[:5]  # Limit services in search results
+                                ]
+                            }
+                            businesses.append(business_data)
+                        
+                        logger.info(f"Found {len(businesses)} businesses from database")
+                else:
+                    logger.debug("DATABASE_URL not configured, skipping database query")
                     
-                    # Apply filters
-                    if query:
-                        query_obj = query_obj.filter(
-                            (Business.business_name.ilike(f"%{query}%")) |
-                            (Business.description.ilike(f"%{query}%"))
-                        )
-                    if category:
-                        query_obj = query_obj.filter(Business.business_type == category)
-                    if location:
-                        query_obj = query_obj.filter(Business.city.ilike(f"%{location}%"))
-                    
-                    db_businesses = query_obj.limit(10).all()
-                    for biz in db_businesses:
-                        businesses.append({
-                            "business_id": str(biz.id),
-                            "name": biz.business_name,
-                            "description": biz.description or "",
-                            "category": biz.business_type,
-                            "location": {
-                                "city": biz.city or "",
-                                "state": biz.state or "",
-                                "address": f"{biz.address or ''}, {biz.city or ''}, {biz.state or ''}"
-                            },
-                            "rating": 4.5,
-                            "services": []  # Will be populated by get_business_services
-                        })
             except Exception as db_error:
                 logger.debug(f"Database query failed, using fallback: {db_error}")
+                # Continue to fallback logic
             
-            # If no database results, include mock data that matches search
-            if not businesses:
+            # Also check in-memory BUSINESS_STORE (from routes_simple.py)
+            # This allows businesses registered via simplified routes to be discoverable
+            try:
+                from routes_simple import BUSINESS_STORE as simple_store
+                
+                for business_id, business_data in simple_store.items():
+                    # Skip if already in results
+                    if any(b.get("business_id") == business_id for b in businesses):
+                        continue
+                    
+                    # Apply search filters
+                    matches = True
+                    business_name = business_data.get("business_name", "").lower()
+                    business_desc = business_data.get("business_info", {}).get("description", "").lower()
+                    business_type = business_data.get("business_type", "").lower()
+                    business_city = business_data.get("location", {}).get("city", "").lower()
+                    business_state = business_data.get("location", {}).get("state", "").lower()
+                    
+                    # Check query match
+                    if query:
+                        query_lower = query.lower()
+                        # Check name, description, and service names
+                        service_names = " ".join([
+                            svc.get("name", "").lower() 
+                            for svc in business_data.get("services_config", [])
+                        ])
+                        matches_query = (
+                            query_lower in business_name or
+                            query_lower in business_desc or
+                            query_lower in service_names
+                        )
+                        if not matches_query:
+                            matches = False
+                    
+                    # Check category match
+                    if category and category.lower() != business_type:
+                        matches = False
+                    
+                    # Check location match
+                    if location:
+                        location_lower = location.lower()
+                        if location_lower not in business_city and location_lower not in business_state:
+                            matches = False
+                    
+                    if matches:
+                        # Get services
+                        services = [
+                            {
+                                "id": svc.get("id", ""),
+                                "name": svc.get("name", ""),
+                                "description": svc.get("description", "")
+                            }
+                            for svc in business_data.get("services_config", [])[:5]
+                        ]
+                        
+                        businesses.append({
+                            "business_id": business_id,
+                            "name": business_data.get("business_name", ""),
+                            "description": business_data.get("business_info", {}).get("description", ""),
+                            "category": business_type,
+                            "location": {
+                                "city": business_data.get("location", {}).get("city", ""),
+                                "state": business_data.get("location", {}).get("state", ""),
+                                "address": business_data.get("location", {}).get("address", "")
+                            },
+                            "phone": business_data.get("contact_info", {}).get("phone", ""),
+                            "website": business_data.get("contact_info", {}).get("website", ""),
+                            "rating": 4.5,
+                            "services": services
+                        })
+                
+                if simple_store:
+                    logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
+            except ImportError:
+                logger.debug("routes_simple not available, skipping in-memory store check")
+            except Exception as store_error:
+                logger.debug(f"In-memory store check failed: {store_error}")
+            
+            # If no database results AND no query provided, include some example businesses
+            # This helps users understand what BAIS can do
+            # NOTE: In production, this should only show if database is empty, not if search returns no results
+            if not businesses and not query:
                 mock_businesses = [
                 {
                     "business_id": "hotel_001",
@@ -358,97 +477,15 @@ class BAISUniversalToolHandler:
                     if matches_query and matches_category and matches_location:
                         businesses.append(business)
             
-            # Add New Life New Image Med Spa if it matches the search
-            # Check if query matches med spa, botox, or aesthetic services in Las Vegas
-            query_lower = query.lower()
-            location_lower = location.lower() if location else ""
-            
-            # Match conditions:
-            # 1. Query contains med spa, spa, botox, aesthetic, or cosmetic terms
-            # 2. Location contains vegas, las vegas, or nevada (or no location specified)
-            matches_med_spa_query = any(term in query_lower for term in [
-                "med spa", "spa", "botox", "aesthetic", "cosmetic", 
-                "injectable", "neurotoxin", "dermal filler", "filler"
-            ])
-            matches_location = (
-                not location or  # No location filter
-                "vegas" in location_lower or  # Las Vegas mentioned
-                "nevada" in location_lower or  # Nevada mentioned
-                location_lower == ""  # Empty location
-            )
-            
-            if matches_med_spa_query and matches_location:
-                # Always insert at the beginning for highest priority
-                customer_business = {
-                    "business_id": "new-life-new-image-med-spa",
-                    "name": "New Life New Image Med Spa",
-                    "description": "Top-Rated Las Vegas Med Spa. Our mission is to empower every client to feel confident, radiant, and authentically themselves. We offer Botox, neurotoxins, dermal fillers, laser treatments, and more.",
-                    "category": "healthcare",
-                    "location": {
-                        "city": "Las Vegas",
-                        "state": "Nevada",
-                        "address": "8867 West Flamingo Rd Ste 101, Las Vegas, NV 89147"
-                    },
-                    "rating": 4.8,
-                    "phone": "+1-702-918-5058",
-                    "website": "https://www.newlifenewimage.com",
-                    "services": [
-                        {"id": "consult_physician", "name": "Consultation with Physician", "keywords": ["consultation", "physician", "doctor"]},
-                        {"id": "neurotoxin", "name": "Neurotoxin / Botox", "keywords": ["botox", "neurotoxin", "xeomin", "wrinkle", "injectable"]},
-                        {"id": "platelet_rich_plasma", "name": "PRF - Platelet Rich Plasma", "keywords": ["prf", "prp", "plasma", "collagen"]},
-                        {"id": "ezgel", "name": "Ez-Gel Bio Identical Filler", "keywords": ["filler", "ezgel", "volume", "lips", "cheeks"]},
-                        {"id": "tattoo_removal", "name": "Tattoo Removal", "keywords": ["tattoo", "removal", "laser"]},
-                        {"id": "co2_skin_rejuvenation", "name": "CO2 Skin Rejuvenation", "keywords": ["co2", "laser", "resurfacing", "rejuvenation"]},
-                        {"id": "rf_microneedling", "name": "RF Microneedling", "keywords": ["microneedling", "rf", "skin", "tightening"]}
-                    ]
-                }
-                # Remove any existing instance and insert at the beginning
-                businesses = [b for b in businesses if b.get("business_id") != "new-life-new-image-med-spa"]
-                businesses.insert(0, customer_business)
+            # NOTE: All registered businesses should now be in the businesses list from the database query above
+            # The database query includes ALL active businesses that match the search criteria
+            # This makes BAIS truly universal - any business registered will be discoverable
             
             return businesses[:10]  # Limit to 10 results
             
         except Exception as e:
             logger.error(f"Search businesses error: {str(e)}", exc_info=True)
-            # Return error information but still include customer business if it matches
-            # This ensures the customer business is always available even if search fails
-            try:
-                query_lower = query.lower() if query else ""
-                location_lower = location.lower() if location else ""
-                
-                matches_med_spa_query = any(term in query_lower for term in [
-                    "med spa", "spa", "botox", "aesthetic", "cosmetic", 
-                    "injectable", "neurotoxin", "dermal filler", "filler"
-                ])
-                matches_location = (
-                    not location or
-                    "vegas" in location_lower or
-                    "nevada" in location_lower or
-                    location_lower == ""
-                )
-                
-                if matches_med_spa_query and matches_location:
-                    return [{
-                        "business_id": "new-life-new-image-med-spa",
-                        "name": "New Life New Image Med Spa",
-                        "description": "Top-Rated Las Vegas Med Spa. Our mission is to empower every client to feel confident, radiant, and authentically themselves. We offer Botox, neurotoxins, dermal fillers, laser treatments, and more.",
-                        "category": "healthcare",
-                        "location": {
-                            "city": "Las Vegas",
-                            "state": "Nevada",
-                            "address": "8867 West Flamingo Rd Ste 101, Las Vegas, NV 89147"
-                        },
-                        "rating": 4.8,
-                        "phone": "+1-702-918-5058",
-                        "website": "https://www.newlifenewimage.com",
-                        "services": [
-                            {"id": "neurotoxin", "name": "Neurotoxin / Botox", "keywords": ["botox", "neurotoxin", "xeomin", "wrinkle", "injectable"]}
-                        ]
-                    }]
-            except:
-                pass
-            
-            # Fallback error response
+            # Return error information
             return [{
                 "error": f"Search failed: {str(e)}",
                 "businesses": []
