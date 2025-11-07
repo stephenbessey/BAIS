@@ -87,14 +87,27 @@ try:
     
     # Import and configure simplified routes
     try:
-        from routes_simple import api_router
+        # Try relative import first
+        try:
+            from .routes_simple import api_router
+            logger.info("Imported routes_simple using relative import")
+        except ImportError:
+            # Try absolute import
+            try:
+                from routes_simple import api_router
+                logger.info("Imported routes_simple using absolute import")
+            except ImportError:
+                # Try with backend.production prefix
+                from backend.production.routes_simple import api_router
+                logger.info("Imported routes_simple using backend.production prefix")
         
         # Include API routes
         app.include_router(api_router, prefix="/api/v1")
         logger.info("Successfully imported and configured simplified API routes")
         
-    except ImportError as e:
-        logger.warning(f"Could not import simplified routes: {e}")
+    except Exception as e:
+        logger.error(f"Could not import simplified routes: {e}")
+        logger.error(f"Import error details: {traceback.format_exc()}")
         import_errors.append(f"Routes import error: {str(e)}")
     
     # Import and configure Universal LLM Integration

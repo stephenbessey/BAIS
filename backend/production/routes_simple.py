@@ -20,7 +20,16 @@ api_router = APIRouter()
 
 # Import shared storage for businesses
 # This ensures businesses are discoverable across all modules
-from .shared_storage import BUSINESS_STORE, register_business
+try:
+    from .shared_storage import BUSINESS_STORE, register_business
+except ImportError:
+    try:
+        from shared_storage import BUSINESS_STORE, register_business
+    except ImportError:
+        # Fallback: create in-place if import fails
+        BUSINESS_STORE: Dict[str, Dict[str, Any]] = {}
+        def register_business(business_id: str, business_data: Dict[str, Any]) -> None:
+            BUSINESS_STORE[business_id] = business_data
 
 
 def generate_business_id(business_name: str) -> str:
@@ -60,7 +69,14 @@ async def register_business(request: BusinessRegistrationRequest):
         
         if database_url and database_url != "not_set":
             try:
-                from ..core.database_models import DatabaseManager, Business, BusinessService
+                # Try multiple import paths for database models
+                try:
+                    from ..core.database_models import DatabaseManager, Business, BusinessService
+                except ImportError:
+                    try:
+                        from core.database_models import DatabaseManager, Business, BusinessService
+                    except ImportError:
+                        from backend.production.core.database_models import DatabaseManager, Business, BusinessService
                 
                 db_manager = DatabaseManager(database_url)
                 with db_manager.get_session() as session:
