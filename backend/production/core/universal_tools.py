@@ -268,8 +268,9 @@ class BAISUniversalToolHandler:
                                 BusinessService.business_id == biz.id
                             ).all()
                             
+                            # Use external_id as business_id for consistency with API
                             business_data = {
-                                "business_id": str(biz.id),
+                                "business_id": biz.external_id or str(biz.id),
                                 "name": biz.name,
                                 "description": biz.description or "",
                                 "category": biz.business_type,
@@ -283,7 +284,7 @@ class BAISUniversalToolHandler:
                                 "rating": 4.5,  # Default rating, can be enhanced with metrics
                                 "services": [
                                     {
-                                        "id": str(svc.id),
+                                        "id": svc.service_id or str(svc.id),
                                         "name": svc.name,
                                         "description": svc.description or ""
                                     }
