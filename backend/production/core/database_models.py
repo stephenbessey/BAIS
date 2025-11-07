@@ -138,15 +138,15 @@ class BusinessAPIKey(Base):
     """API keys for business authentication"""
     __tablename__ = "business_api_keys"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
     key_name = Column(String(100), nullable=False)
     key_hash = Column(String(128), nullable=False, unique=True, index=True)
     key_prefix = Column(String(8), nullable=False)
     
-    # Permissions and scope
-    scopes = Column(ARRAY(String), nullable=False)
-    permissions = Column(JSONB, default=dict)
+    # Permissions and scope - use JSON for arrays (works with both PostgreSQL and SQLite)
+    scopes = Column(JSON, nullable=False)
+    permissions = Column(JSON, default=dict)
     
     # Key metadata
     last_used_at = Column(DateTime)

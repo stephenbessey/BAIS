@@ -70,16 +70,27 @@ async def register_business(request: BusinessRegistrationRequest):
         if database_url and database_url != "not_set":
             try:
                 # Try multiple import paths for database models
+                DatabaseManager = None
+                Business = None
+                BusinessService = None
+                
                 try:
                     from ..core.database_models import DatabaseManager, Business, BusinessService
-                except ImportError:
+                except (ImportError, NameError) as e1:
+                    logger.debug(f"Relative import failed: {e1}")
                     try:
                         from core.database_models import DatabaseManager, Business, BusinessService
-                    except ImportError:
-                        from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                    except (ImportError, NameError) as e2:
+                        logger.debug(f"Absolute import failed: {e2}")
+                        try:
+                            from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                        except (ImportError, NameError) as e3:
+                            logger.warning(f"All database model imports failed: {e3}")
+                            DatabaseManager = None
                 
-                db_manager = DatabaseManager(database_url)
-                with db_manager.get_session() as session:
+                if DatabaseManager and Business and BusinessService:
+                    db_manager = DatabaseManager(database_url)
+                    with db_manager.get_session() as session:
                     # Check if business already exists
                     existing = session.query(Business).filter(
                         Business.external_id == business_id
@@ -152,14 +163,17 @@ async def register_business(request: BusinessRegistrationRequest):
                         )
                         session.add(service)
                     
-                    session.commit()
-                    db_saved = True
-                    logger.info(f"Saved business to database: {request.business_name} (ID: {business_id}, DB ID: {business_id_str})")
-                    
+                        session.commit()
+                        db_saved = True
+                        logger.info(f"Saved business to database: {request.business_name} (ID: {business_id}, DB ID: {business_id_str})")
+                else:
+                    logger.warning("Database models not available, skipping database save")
             except HTTPException:
                 raise
             except Exception as db_error:
                 logger.warning(f"Database save failed, using in-memory storage: {db_error}")
+                import traceback
+                logger.debug(f"Database error details: {traceback.format_exc()}")
                 # Continue to in-memory storage as fallback
         
         # Also store in memory (for immediate access and fallback)
