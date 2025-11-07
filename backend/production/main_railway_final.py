@@ -118,6 +118,18 @@ try:
     
     logger.info("Successfully created BAIS application with available routes")
     
+    # Initialize database tables if DATABASE_URL is configured
+    database_url = os.getenv("DATABASE_URL")
+    if database_url and database_url != "not_set":
+        try:
+            from core.database_models import DatabaseManager
+            db_manager = DatabaseManager(database_url)
+            db_manager.create_tables()
+            logger.info("Database tables initialized successfully")
+        except Exception as db_error:
+            logger.warning(f"Database initialization failed: {db_error}")
+            logger.warning("Continuing with in-memory storage only")
+    
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")
     logger.error(f"Unexpected error during initialization: {str(e)}")

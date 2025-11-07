@@ -9,13 +9,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
-from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
 from sqlalchemy import create_engine, event
 from datetime import datetime
 import uuid
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from pydantic import BaseModel
 import json
+import os
+
+# Use compatible types that work with both PostgreSQL and SQLite
+# String(36) for UUIDs works with both databases
+# JSON works with both (PostgreSQL supports it, SQLite 3.38+ supports it)
 
 if TYPE_CHECKING:
     from .parameter_objects import BusinessSearchCriteria
@@ -26,7 +30,7 @@ class Business(Base):
     """Business entity with BAIS integration"""
     __tablename__ = "businesses"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     external_id = Column(String(100), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
     business_type = Column(String(50), nullable=False, index=True)
@@ -62,13 +66,13 @@ class Business(Base):
     ap2_enabled = Column(Boolean, default=False, index=True)
     ap2_client_id = Column(String(255))
     ap2_public_key = Column(Text)  # PEM format public key
-    ap2_supported_payment_methods = Column(JSONB, default=list)  # List of supported payment method types
+    ap2_supported_payment_methods = Column(JSON, default=list)  # List of supported payment method types
     ap2_webhook_endpoint = Column(String(255))
     ap2_verification_required = Column(Boolean, default=True)
     
     # Status and metadata
     status = Column(String(20), default="active", index=True)
-    compliance_flags = Column(JSONB, default=dict)
+    compliance_flags = Column(JSON, default=dict)
     
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -91,8 +95,8 @@ class BusinessService(Base):
     """Business service with BAIS schema"""
     __tablename__ = "business_services"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
     service_id = Column(String(100), nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
@@ -100,8 +104,8 @@ class BusinessService(Base):
     
     # Service configuration
     workflow_pattern = Column(String(50), nullable=False)
-    workflow_steps = Column(JSONB, nullable=False)
-    parameters_schema = Column(JSONB, nullable=False)
+    workflow_steps = Column(JSON, nullable=False)
+    parameters_schema = Column(JSON, nullable=False)
     
     # Availability configuration
     availability_endpoint = Column(String(255), nullable=False)
@@ -110,8 +114,8 @@ class BusinessService(Base):
     advance_booking_days = Column(Integer, default=365)
     
     # Policies
-    cancellation_policy = Column(JSONB, nullable=False)
-    payment_config = Column(JSONB, nullable=False)
+    cancellation_policy = Column(JSON, nullable=False)
+    payment_config = Column(JSON, nullable=False)
     modification_fee = Column(Float, default=0.0)
     no_show_penalty = Column(Float, default=0.0)
     
