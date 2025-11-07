@@ -11,5 +11,12 @@
     "healthcheckTimeout": 60,
     "healthcheckInterval": 10,
     "healthcheckRetries": 6
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "DATABASE_URL": "${{Postgres.DATABASE_URL}}"
+      }
+    }
   }
 }
