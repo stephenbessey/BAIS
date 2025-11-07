@@ -300,19 +300,19 @@ class BAISUniversalToolHandler:
                 logger.debug(f"Database query failed, using fallback: {db_error}")
                 # Continue to fallback logic
             
-            # Also check in-memory BUSINESS_STORE (from routes_simple.py)
+            # Also check in-memory BUSINESS_STORE (from shared_storage.py)
             # This allows businesses registered via simplified routes to be discoverable
             try:
-                # Try multiple import paths for routes_simple
+                # Try multiple import paths for shared_storage
                 simple_store = None
                 try:
-                    from routes_simple import BUSINESS_STORE as simple_store
+                    from shared_storage import BUSINESS_STORE as simple_store
                 except ImportError:
                     try:
-                        from ..routes_simple import BUSINESS_STORE as simple_store
+                        from ..shared_storage import BUSINESS_STORE as simple_store
                     except ImportError:
                         try:
-                            from backend.production.routes_simple import BUSINESS_STORE as simple_store
+                            from backend.production.shared_storage import BUSINESS_STORE as simple_store
                         except ImportError:
                             # Try importing the module and accessing the attribute
                             import sys
@@ -322,9 +322,10 @@ class BAISUniversalToolHandler:
                             if parent_dir not in sys.path:
                                 sys.path.insert(0, parent_dir)
                             try:
-                                from backend.production import routes_simple
-                                simple_store = getattr(routes_simple, 'BUSINESS_STORE', None)
-                            except Exception:
+                                from backend.production import shared_storage
+                                simple_store = getattr(shared_storage, 'BUSINESS_STORE', None)
+                            except Exception as import_err:
+                                logger.debug(f"Could not import shared_storage: {import_err}")
                                 pass
                 
                 if simple_store:

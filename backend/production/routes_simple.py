@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 # Create the API router
 api_router = APIRouter()
 
-# In-memory storage for businesses (shared with universal_tools)
-# This makes businesses discoverable even without database
-BUSINESS_STORE: Dict[str, Dict[str, Any]] = {}
+# Import shared storage for businesses
+# This ensures businesses are discoverable across all modules
+from .shared_storage import BUSINESS_STORE, register_business
 
 
 def generate_business_id(business_name: str) -> str:
@@ -73,7 +73,7 @@ async def register_business(request: BusinessRegistrationRequest):
             "registered_at": datetime.utcnow().isoformat()
         }
         
-        BUSINESS_STORE[business_id] = business_data
+        register_business(business_id, business_data)
         
         logger.info(f"Registered business: {request.business_name} (ID: {business_id})")
         logger.info(f"Total businesses registered: {len(BUSINESS_STORE)}")
