@@ -132,16 +132,34 @@ try:
     logger.info("Successfully created BAIS application with available routes")
     
     # Initialize database tables if DATABASE_URL is configured
+    # Do this after routes are loaded so routes work even if DB init fails
     database_url = os.getenv("DATABASE_URL")
     if database_url and database_url != "not_set":
         try:
-            from core.database_models import DatabaseManager
-            db_manager = DatabaseManager(database_url)
-            db_manager.create_tables()
-            logger.info("Database tables initialized successfully")
+            # Try multiple import paths
+            DatabaseManager = None
+            try:
+                from core.database_models import DatabaseManager
+            except (ImportError, NameError):
+                try:
+                    from .core.database_models import DatabaseManager
+                except (ImportError, NameError):
+                    try:
+                        from backend.production.core.database_models import DatabaseManager
+                    except (ImportError, NameError) as e:
+                        logger.warning(f"Could not import DatabaseManager: {e}")
+            
+            if DatabaseManager:
+                db_manager = DatabaseManager(database_url)
+                db_manager.create_tables()
+                logger.info("Database tables initialized successfully")
+            else:
+                logger.warning("DatabaseManager not available, skipping table initialization")
         except Exception as db_error:
             logger.warning(f"Database initialization failed: {db_error}")
-            logger.warning("Continuing with in-memory storage only")
+            logger.warning("Continuing with in-memory storage only - routes will still work")
+            import traceback
+            logger.debug(f"Database init error details: {traceback.format_exc()}")
     
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")
