@@ -303,80 +303,133 @@ class BAISUniversalToolHandler:
             # Also check in-memory BUSINESS_STORE (from routes_simple.py)
             # This allows businesses registered via simplified routes to be discoverable
             try:
-                from routes_simple import BUSINESS_STORE as simple_store
-                
-                for business_id, business_data in simple_store.items():
-                    # Skip if already in results
-                    if any(b.get("business_id") == business_id for b in businesses):
-                        continue
-                    
-                    # Apply search filters
-                    matches = True
-                    business_name = business_data.get("business_name", "").lower()
-                    business_desc = business_data.get("business_info", {}).get("description", "").lower()
-                    business_type = business_data.get("business_type", "").lower()
-                    business_city = business_data.get("location", {}).get("city", "").lower()
-                    business_state = business_data.get("location", {}).get("state", "").lower()
-                    
-                    # Check query match
-                    if query:
-                        query_lower = query.lower()
-                        # Check name, description, and service names
-                        service_names = " ".join([
-                            svc.get("name", "").lower() 
-                            for svc in business_data.get("services_config", [])
-                        ])
-                        matches_query = (
-                            query_lower in business_name or
-                            query_lower in business_desc or
-                            query_lower in service_names
-                        )
-                        if not matches_query:
-                            matches = False
-                    
-                    # Check category match
-                    if category and category.lower() != business_type:
-                        matches = False
-                    
-                    # Check location match
-                    if location:
-                        location_lower = location.lower()
-                        if location_lower not in business_city and location_lower not in business_state:
-                            matches = False
-                    
-                    if matches:
-                        # Get services
-                        services = [
-                            {
-                                "id": svc.get("id", ""),
-                                "name": svc.get("name", ""),
-                                "description": svc.get("description", "")
-                            }
-                            for svc in business_data.get("services_config", [])[:5]
-                        ]
-                        
-                        businesses.append({
-                            "business_id": business_id,
-                            "name": business_data.get("business_name", ""),
-                            "description": business_data.get("business_info", {}).get("description", ""),
-                            "category": business_type,
-                            "location": {
-                                "city": business_data.get("location", {}).get("city", ""),
-                                "state": business_data.get("location", {}).get("state", ""),
-                                "address": business_data.get("location", {}).get("address", "")
-                            },
-                            "phone": business_data.get("contact_info", {}).get("phone", ""),
-                            "website": business_data.get("contact_info", {}).get("website", ""),
-                            "rating": 4.5,
-                            "services": services
-                        })
+                # Try multiple import paths for routes_simple
+                simple_store = None
+                try:
+                    from routes_simple import BUSINESS_STORE as simple_store
+                except ImportError:
+                    try:
+                        from ..routes_simple import BUSINESS_STORE as simple_store
+                    except ImportError:
+                        try:
+                            from backend.production.routes_simple import BUSINESS_STORE as simple_store
+                        except ImportError:
+                            # Try importing the module and accessing the attribute
+                            import sys
+                            import os
+                            # Add parent directory to path if needed
+                            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                            try:
+                                from backend.production import routes_simple
+                                simple_store = getattr(routes_simple, 'BUSINESS_STORE', None)
+                            except Exception:
+                                pass
                 
                 if simple_store:
+                    logger.info(f"Checking in-memory BUSINESS_STORE with {len(simple_store)} businesses")
+                    for business_id, business_data in simple_store.items():
+                        # Skip if already in results
+                        if any(b.get("business_id") == business_id for b in businesses):
+                            continue
+                        
+                        # Apply search filters
+                        matches = True
+                        business_name = business_data.get("business_name", "").lower()
+                        business_desc = business_data.get("business_info", {}).get("description", "").lower()
+                        business_type = business_data.get("business_type", "").lower()
+                        business_city = business_data.get("location", {}).get("city", "").lower()
+                        business_state = business_data.get("location", {}).get("state", "").lower()
+                        
+                        # Normalize location strings (remove punctuation, extra spaces)
+                        def normalize_location(loc_str):
+                            if not loc_str:
+                                return ""
+                            return " ".join(loc_str.lower().replace(",", " ").split())
+                        
+                        # Check query match - more flexible matching
+                        if query:
+                            query_lower = query.lower().strip()
+                            query_words = query_lower.split()
+                            
+                            # Check name, description, and service names
+                            service_names = " ".join([
+                                svc.get("name", "").lower() 
+                                for svc in business_data.get("services_config", [])
+                            ])
+                            
+                            # Match if any query word is in business name/description/services
+                            # OR if full query is contained
+                            matches_query = (
+                                query_lower in business_name or
+                                query_lower in business_desc or
+                                query_lower in service_names or
+                                any(word in business_name for word in query_words if len(word) > 2) or
+                                any(word in business_desc for word in query_words if len(word) > 2) or
+                                any(word in service_names for word in query_words if len(word) > 2)
+                            )
+                            
+                            if not matches_query:
+                                matches = False
+                        
+                        # Check category match
+                        if category and category.lower() != business_type:
+                            matches = False
+                        
+                        # Check location match - more flexible
+                        if location:
+                            location_lower = normalize_location(location)
+                            business_city_norm = normalize_location(business_city)
+                            business_state_norm = normalize_location(business_state)
+                            
+                            # Match if location is in city, state, or contains key words
+                            location_words = location_lower.split()
+                            matches_location = (
+                                location_lower in business_city_norm or
+                                location_lower in business_state_norm or
+                                business_city_norm in location_lower or
+                                any(word in business_city_norm for word in location_words if len(word) > 2) or
+                                any(word in business_state_norm for word in location_words if len(word) > 2)
+                            )
+                            
+                            if not matches_location:
+                                matches = False
+                        
+                        if matches:
+                            # Get services
+                            services = [
+                                {
+                                    "id": svc.get("id", ""),
+                                    "name": svc.get("name", ""),
+                                    "description": svc.get("description", "")
+                                }
+                                for svc in business_data.get("services_config", [])[:5]
+                            ]
+                            
+                            business_result = {
+                                "business_id": business_id,
+                                "name": business_data.get("business_name", ""),
+                                "description": business_data.get("business_info", {}).get("description", ""),
+                                "category": business_type,
+                                "location": {
+                                    "city": business_data.get("location", {}).get("city", ""),
+                                    "state": business_data.get("location", {}).get("state", ""),
+                                    "address": business_data.get("location", {}).get("address", "")
+                                },
+                                "phone": business_data.get("contact_info", {}).get("phone", ""),
+                                "website": business_data.get("contact_info", {}).get("website", ""),
+                                "rating": 4.5,
+                                "services": services
+                            }
+                            businesses.append(business_result)
+                            logger.info(f"Matched business from in-memory store: {business_data.get('business_name')}")
+                    
                     logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
-            except ImportError:
-                logger.debug("routes_simple not available, skipping in-memory store check")
+                else:
+                    logger.debug("BUSINESS_STORE not found in routes_simple")
             except Exception as store_error:
-                logger.debug(f"In-memory store check failed: {store_error}")
+                logger.error(f"In-memory store check failed: {store_error}", exc_info=True)
             
             # If no database results AND no query provided, include some example businesses
             # This helps users understand what BAIS can do

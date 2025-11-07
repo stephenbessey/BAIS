@@ -5,7 +5,7 @@ Handles tool calls from Claude, ChatGPT, and Gemini for ALL businesses
 
 from fastapi import APIRouter, HTTPException, Header, Request, Depends
 from pydantic import BaseModel
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 import hmac
 import hashlib
 import json
@@ -42,7 +42,7 @@ class UniversalToolRequest(BaseModel):
 class UniversalToolResponse(BaseModel):
     """Base model for universal tool responses"""
     success: bool
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[Union[Dict[str, Any], List[Dict[str, Any]], Any]] = None
     error: Optional[str] = None
     timestamp: str = datetime.utcnow().isoformat()
 
