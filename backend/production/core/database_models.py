@@ -291,7 +291,7 @@ class Booking(Base):
     customer_phone = Column(String(20))
     
     # Booking details
-    booking_data = Column(JSONB, nullable=False)
+    booking_data = Column(JSON, nullable=False)
     service_date = Column(DateTime, index=True)
     check_in = Column(DateTime, index=True)
     check_out = Column(DateTime, index=True)
@@ -301,7 +301,7 @@ class Booking(Base):
     total_amount = Column(Float, nullable=False)
     currency = Column(String(3), default="USD")
     payment_status = Column(String(20), default="pending", index=True)
-    payment_data = Column(JSONB)
+    payment_data = Column(JSON)
     
     # AP2 Payment Protocol fields
     ap2_intent_mandate_id = Column(String(255), index=True)
