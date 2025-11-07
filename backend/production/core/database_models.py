@@ -21,6 +21,19 @@ import os
 # String(36) for UUIDs works with both databases
 # JSON works with both (PostgreSQL supports it, SQLite 3.38+ supports it)
 
+# Define compatibility functions for PostgreSQL types
+# These work with both PostgreSQL and SQLite
+def UUID(**kwargs):
+    """UUID compatibility - returns String(36) for cross-database compatibility"""
+    return String(36)
+
+def ARRAY(*args):
+    """ARRAY compatibility - returns JSON for cross-database compatibility"""
+    return JSON
+
+# JSONB is just an alias for JSON
+JSONB = JSON
+
 if TYPE_CHECKING:
     from .parameter_objects import BusinessSearchCriteria
 
@@ -171,17 +184,17 @@ class OAuthClient(Base):
     """OAuth 2.0 clients for businesses"""
     __tablename__ = "oauth_clients"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
     client_id = Column(String(255), unique=True, nullable=False, index=True)
     client_secret_hash = Column(String(128), nullable=False)
     client_name = Column(String(255), nullable=False)
     
     # OAuth configuration
-    redirect_uris = Column(ARRAY(String), nullable=False)
-    allowed_scopes = Column(ARRAY(String), nullable=False)
-    grant_types = Column(ARRAY(String), nullable=False)
-    response_types = Column(ARRAY(String), nullable=False)
+    redirect_uris = Column(JSON, nullable=False)
+    allowed_scopes = Column(JSON, nullable=False)
+    grant_types = Column(JSON, nullable=False)
+    response_types = Column(JSON, nullable=False)
     
     # Client metadata
     is_confidential = Column(Boolean, default=True)
@@ -203,7 +216,7 @@ class OAuthAccessToken(Base):
     token_hash = Column(String(128), unique=True, nullable=False, index=True)
     
     # Token data
-    scopes = Column(ARRAY(String), nullable=False)
+    scopes = Column(JSON, nullable=False)
     business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"))
     agent_id = Column(String(255))
     
@@ -224,9 +237,9 @@ class AgentInteraction(Base):
     """Agent interactions with business services"""
     __tablename__ = "agent_interactions"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
-    service_id = Column(UUID(as_uuid=True), ForeignKey("business_services.id"))
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
+    service_id = Column(String(36), ForeignKey("business_services.id"))
     
     # Agent information
     agent_id = Column(String(255), nullable=False, index=True)
@@ -236,8 +249,8 @@ class AgentInteraction(Base):
     # Interaction details
     interaction_type = Column(String(50), nullable=False, index=True)
     protocol_used = Column(String(20), nullable=False)  # 'mcp' or 'a2a'
-    request_data = Column(JSONB, nullable=False)
-    response_data = Column(JSONB)
+    request_data = Column(JSON, nullable=False)
+    response_data = Column(JSON)
     
     # Outcome tracking
     status = Column(String(20), nullable=False, index=True)
@@ -263,8 +276,8 @@ class Booking(Base):
     """Bookings created through BAIS"""
     __tablename__ = "bookings"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
     service_id = Column(UUID(as_uuid=True), ForeignKey("business_services.id"), nullable=False)
     
     # Booking identification
@@ -321,8 +334,8 @@ class BusinessMetrics(Base):
     """Aggregated business metrics"""
     __tablename__ = "business_metrics"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    business_id = Column(UUID(as_uuid=True), ForeignKey("businesses.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    business_id = Column(String(36), ForeignKey("businesses.id"), nullable=False)
     
     # Time period
     metric_date = Column(DateTime, nullable=False, index=True)
