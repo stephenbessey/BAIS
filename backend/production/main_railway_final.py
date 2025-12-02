@@ -54,34 +54,46 @@ def get_system_info() -> Dict[str, Any]:
         return {"error": f"Failed to get system info: {str(e)}"}
 
 # Try to import and create the complete BAIS application
-app = None
 import_errors = []
 system_info = get_system_info()
+
+# Create the FastAPI app FIRST, before any other imports
+# This ensures the app exists even if imports fail
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+# Create the FastAPI app immediately
+app = FastAPI(
+    title="BAIS Production Server",
+    description="Business-Agent Integration Standard Production Implementation - Complete Backend",
+    version="1.0.0"
+)
+
+# Add CORS middleware immediately
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Add basic health endpoint immediately (before other imports)
+@app.get("/health")
+def basic_health_check():
+    """Basic health check that's always available"""
+    return {
+        "status": "starting" if import_errors else "healthy",
+        "service": "BAIS Production Server",
+        "environment": "railway",
+        "import_errors": len(import_errors),
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 try:
     logger.info("Starting BAIS Railway final deployment initialization...")
     logger.info(f"System info: {system_info}")
-    
-    # Import FastAPI and create basic app structure
-    from fastapi import FastAPI
-    from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
-    
-    # Create the FastAPI app
-    app = FastAPI(
-        title="BAIS Production Server",
-        description="Business-Agent Integration Standard Production Implementation - Complete Backend",
-        version="1.0.0"
-    )
-    
-    # Configure CORS
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
     
     # Add static file serving for frontend
     try:
@@ -240,16 +252,8 @@ def root():
         }
     }
 
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy" if len(import_errors) == 0 else "degraded",
-        "service": "BAIS Production Server",
-        "environment": "railway",
-        "import_errors": len(import_errors),
-        "timestamp": datetime.utcnow().isoformat(),
-        "ready_for_customers": len(import_errors) == 0
-    }
+# Health endpoint is already defined above - this is just for reference
+# The health endpoint at line 83 is the one that will be used
 
 @app.get("/api/status")
 def api_status():
