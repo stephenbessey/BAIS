@@ -368,6 +368,22 @@ async def global_exception_handler(request, exc):
         }
     )
 
+# Final safety check: ensure app is always defined
+if app is None:
+    logger.error("CRITICAL: App is None! Creating emergency fallback app.")
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+    app = FastAPI(title="BAIS Emergency Fallback")
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    
+    @app.get("/")
+    def emergency_root():
+        return {"status": "error", "message": "App initialization failed", "import_errors": import_errors}
+    
+    @app.get("/health")
+    def emergency_health():
+        return {"status": "degraded", "message": "Emergency fallback mode", "import_errors": import_errors}
+
 logger.info(f"BAIS Railway final application initialized. Import errors: {len(import_errors)}")
 if import_errors:
     logger.warning(f"Import errors detected: {import_errors}")
