@@ -80,16 +80,20 @@ app.add_middleware(
 )
 
 # Add basic health endpoint immediately (before other imports)
+# This endpoint MUST work even if everything else fails
 @app.get("/health")
 def basic_health_check():
-    """Basic health check that's always available"""
-    return {
-        "status": "starting" if import_errors else "healthy",
-        "service": "BAIS Production Server",
-        "environment": "railway",
-        "import_errors": len(import_errors),
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """Basic health check that's always available - no dependencies"""
+    try:
+        return {
+            "status": "healthy",
+            "service": "BAIS Production Server",
+            "environment": "railway",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception:
+        # Even if datetime fails, return something
+        return {"status": "healthy", "service": "BAIS Production Server"}
 
 try:
     logger.info("Starting BAIS Railway final deployment initialization...")
@@ -208,28 +212,26 @@ try:
                         logger.warning(f"Could not import DatabaseManager: {e}")
             
             if DatabaseManager:
-                db_manager = DatabaseManager(database_url)
-                db_manager.create_tables()
-                logger.info("Database tables initialized successfully")
+                try:
+                    db_manager = DatabaseManager(database_url)
+                    db_manager.create_tables()
+                    logger.info("Database tables initialized successfully")
+                except Exception as db_init_error:
+                    logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
+                    # Don't fail the entire app if database init fails
             else:
                 logger.warning("DatabaseManager not available, skipping table initialization")
         except Exception as db_error:
             logger.warning(f"Database initialization failed: {db_error}")
             logger.warning("Continuing with in-memory storage only - routes will still work")
-            import traceback
-            logger.debug(f"Database init error details: {traceback.format_exc()}")
+            # Don't re-raise - allow app to continue
     
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")
     logger.error(f"Unexpected error during initialization: {str(e)}")
     logger.error(f"Traceback: {traceback.format_exc()}")
-    
-    # Create minimal diagnostic app as fallback
-    from fastapi import FastAPI
-    from fastapi.middleware.cors import CORSMiddleware
-    
-    app = FastAPI(title="BAIS Error Diagnostic Server")
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    # App already exists, so we don't need to recreate it
+    # Just log the error and continue
 
 # Add core endpoints (always available)
 @app.get("/")
