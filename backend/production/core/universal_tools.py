@@ -225,6 +225,7 @@ class BAISUniversalToolHandler:
             businesses = []
             
             # Try to query database if available - query ALL registered businesses
+            db_checked = False
             try:
                 from ..core.database_models import DatabaseManager, Business, BusinessService
                 import os
@@ -232,32 +233,85 @@ class BAISUniversalToolHandler:
                 # Get database URL from environment
                 database_url = os.getenv("DATABASE_URL")
                 if database_url and database_url != "not_set":
+                    logger.info(f"Searching database for query='{query}', location='{location}', category='{category}'")
                     db_manager = DatabaseManager(database_url)
                     with db_manager.get_session() as session:
                         query_obj = session.query(Business).filter(Business.status == "active")
+                        db_checked = True
                         
                         # Apply search filters
                         if query:
-                            # Search in name, description, and service names
-                            query_lower = query.lower()
-                            query_obj = query_obj.filter(
-                                (Business.name.ilike(f"%{query_lower}%")) |
-                                (Business.description.ilike(f"%{query_lower}%")) |
-                                # Also search in service names through relationships
+                            # Normalize query for better matching (handle "med spa" -> "medspa", etc.)
+                            query_lower = query.lower().strip()
+                            query_normalized = query_lower.replace(" ", "").replace("-", "")
+                            query_words = query_lower.split()
+                            
+                            # Build flexible search conditions
+                            search_conditions = []
+                            
+                            # Exact and partial matches
+                            search_conditions.append(Business.name.ilike(f"%{query_lower}%"))
+                            search_conditions.append(Business.description.ilike(f"%{query_lower}%"))
+                            
+                            # Normalized matches (handles "med spa" matching "medspa" in name)
+                            if query_normalized:
+                                search_conditions.append(
+                                    Business.name.ilike(f"%{query_normalized}%")
+                                )
+                                search_conditions.append(
+                                    Business.description.ilike(f"%{query_normalized}%")
+                                )
+                            
+                            # Word-by-word matching for multi-word queries (very lenient)
+                            for word in query_words:
+                                if len(word) > 2:
+                                    search_conditions.append(Business.name.ilike(f"%{word}%"))
+                                    search_conditions.append(Business.description.ilike(f"%{word}%"))
+                            
+                            # Very lenient: if query is "med spa", match if name contains "med" OR "spa"
+                            # This ensures "New Life New Image Med Spa" matches "med spa" query
+                            if len(query_words) >= 2:
+                                # Match if all significant words appear somewhere in name or description
+                                for word in query_words:
+                                    if len(word) > 2:
+                                        search_conditions.append(Business.name.ilike(f"%{word}%"))
+                                        search_conditions.append(Business.description.ilike(f"%{word}%"))
+                            
+                            # Also search in service names through relationships
+                            search_conditions.append(
                                 Business.services.any(
                                     BusinessService.name.ilike(f"%{query_lower}%")
                                 )
                             )
+                            
+                            from sqlalchemy import or_
+                            query_obj = query_obj.filter(or_(*search_conditions))
                         
                         if category:
                             query_obj = query_obj.filter(Business.business_type == category)
                         
                         if location:
-                            location_lower = location.lower()
-                            query_obj = query_obj.filter(
-                                (Business.city.ilike(f"%{location_lower}%")) |
-                                (Business.state.ilike(f"%{location_lower}%"))
-                            )
+                            location_lower = location.lower().strip()
+                            location_normalized = location_lower.replace(",", " ").replace(".", "").strip()
+                            location_words = location_normalized.split()
+                            
+                            location_conditions = []
+                            location_conditions.append(Business.city.ilike(f"%{location_lower}%"))
+                            location_conditions.append(Business.state.ilike(f"%{location_lower}%"))
+                            
+                            # Handle "Las Vegas" variations
+                            if "vegas" in location_lower or "las vegas" in location_lower:
+                                location_conditions.append(Business.city.ilike("%las vegas%"))
+                                location_conditions.append(Business.city.ilike("%vegas%"))
+                            
+                            # Word-by-word matching
+                            for word in location_words:
+                                if len(word) > 2:
+                                    location_conditions.append(Business.city.ilike(f"%{word}%"))
+                                    location_conditions.append(Business.state.ilike(f"%{word}%"))
+                            
+                            from sqlalchemy import or_
+                            query_obj = query_obj.filter(or_(*location_conditions))
                         
                         # Get matching businesses
                         db_businesses = query_obj.limit(10).all()
@@ -331,7 +385,9 @@ class BAISUniversalToolHandler:
                 
                 if simple_store:
                     logger.info(f"Checking in-memory BUSINESS_STORE with {len(simple_store)} businesses")
+                    logger.info(f"Business IDs in store: {list(simple_store.keys())}")
                     for business_id, business_data in simple_store.items():
+                        logger.info(f"Checking business: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
                         # Skip if already in results
                         if any(b.get("business_id") == business_id for b in businesses):
                             continue
@@ -355,25 +411,48 @@ class BAISUniversalToolHandler:
                             query_lower = query.lower().strip()
                             query_words = query_lower.split()
                             
+                            # Normalize query terms (handle "med spa" -> "medspa", "med-spa", etc.)
+                            normalized_query = query_lower.replace(" ", "").replace("-", "")
+                            normalized_name = business_name.replace(" ", "").replace("-", "")
+                            
                             # Check name, description, and service names
                             service_names = " ".join([
                                 svc.get("name", "").lower() 
                                 for svc in business_data.get("services_config", [])
                             ])
                             
-                            # Match if any query word is in business name/description/services
-                            # OR if full query is contained
+                            # Enhanced matching: check normalized strings, partial matches, and keyword matching
+                            query_matches = (
+                                query_lower in business_name or
+                                business_name in query_lower or
+                                normalized_query in normalized_name or
+                                normalized_name in normalized_query or
+                                any(word in business_name for word in query_words if len(word) > 2) or
+                                query_lower in business_desc or
+                                any(word in business_desc for word in query_words if len(word) > 2) or
+                                query_lower in service_names or
+                                any(word in service_names for word in query_words if len(word) > 2)
+                            )
+                            
+                            # Very lenient matching: if ANY query word appears in name/description/services, it's a match
+                            # This ensures "med spa" matches "New Life New Image Med Spa"
                             matches_query = (
                                 query_lower in business_name or
                                 query_lower in business_desc or
                                 query_lower in service_names or
                                 any(word in business_name for word in query_words if len(word) > 2) or
                                 any(word in business_desc for word in query_words if len(word) > 2) or
-                                any(word in service_names for word in query_words if len(word) > 2)
+                                any(word in service_names for word in query_words if len(word) > 2) or
+                                # Very lenient: if normalized query appears anywhere
+                                normalized_query in normalized_name or
+                                normalized_name in normalized_query
                             )
                             
                             if not matches_query:
                                 matches = False
+                                logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' didn't match query '{query_lower}'")
+                            else:
+                                logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' MATCHED query '{query_lower}'")
                         
                         # Check category match
                         if category and category.lower() != business_type:
@@ -385,6 +464,20 @@ class BAISUniversalToolHandler:
                             business_city_norm = normalize_location(business_city)
                             business_state_norm = normalize_location(business_state)
                             
+                            # Handle state abbreviations and full names
+                            state_mappings = {
+                                "nv": "nevada", "nevada": "nv",
+                                "ca": "california", "california": "ca",
+                                "ny": "new york", "new york": "ny"
+                            }
+                            
+                            location_normalized = location_lower
+                            for abbrev, full in state_mappings.items():
+                                if abbrev in location_normalized:
+                                    location_normalized = location_normalized.replace(abbrev, full)
+                                if full in location_normalized:
+                                    location_normalized = location_normalized.replace(full, abbrev)
+                            
                             # Match if location is in city, state, or contains key words
                             location_words = location_lower.split()
                             matches_location = (
@@ -392,11 +485,17 @@ class BAISUniversalToolHandler:
                                 location_lower in business_state_norm or
                                 business_city_norm in location_lower or
                                 any(word in business_city_norm for word in location_words if len(word) > 2) or
-                                any(word in business_state_norm for word in location_words if len(word) > 2)
+                                any(word in business_state_norm for word in location_words if len(word) > 2) or
+                                # Handle "Las Vegas" matching
+                                ("vegas" in location_lower and "vegas" in business_city_norm) or
+                                ("las vegas" in location_lower and "las vegas" in business_city_norm)
                             )
                             
                             if not matches_location:
                                 matches = False
+                                logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' in {business_city_norm}, {business_state_norm} didn't match location '{location_lower}'")
+                            else:
+                                logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' matched location '{location_lower}'")
                         
                         if matches:
                             # Get services
@@ -425,7 +524,7 @@ class BAISUniversalToolHandler:
                                 "services": services
                             }
                             businesses.append(business_result)
-                            logger.info(f"Matched business from in-memory store: {business_data.get('business_name')}")
+                            logger.info(f"✓ Added business from in-memory store: {business_data.get('business_name')} (ID: {business_id})")
                     
                     logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
                 else:
@@ -535,6 +634,70 @@ class BAISUniversalToolHandler:
             # NOTE: All registered businesses should now be in the businesses list from the database query above
             # The database query includes ALL active businesses that match the search criteria
             # This makes BAIS truly universal - any business registered will be discoverable
+            
+            # If still no results, try returning ALL active businesses (very lenient fallback)
+            if len(businesses) == 0:
+                logger.warning("No businesses found with any search criteria, trying to return all active businesses")
+                try:
+                    from ..core.database_models import DatabaseManager, Business, BusinessService
+                    import os
+                    database_url = os.getenv("DATABASE_URL")
+                    if database_url and database_url != "not_set":
+                        db_manager = DatabaseManager(database_url)
+                        with db_manager.get_session() as session:
+                            all_businesses = session.query(Business).filter(
+                                Business.status == "active"
+                            ).limit(10).all()
+                            
+                            logger.info(f"Found {len(all_businesses)} active businesses in database")
+                            
+                            for biz in all_businesses:
+                                services = session.query(BusinessService).filter(
+                                    BusinessService.business_id == biz.id
+                                ).all()
+                                
+                                business_data = {
+                                    "business_id": biz.external_id or str(biz.id),
+                                    "name": biz.name,
+                                    "description": biz.description or "",
+                                    "category": biz.business_type,
+                                    "location": {
+                                        "city": biz.city or "",
+                                        "state": biz.state or "",
+                                        "address": f"{biz.address or ''}, {biz.city or ''}, {biz.state or ''}"
+                                    },
+                                    "phone": biz.phone or "",
+                                    "website": biz.website or "",
+                                    "rating": 4.5,
+                                    "services": [
+                                        {
+                                            "id": svc.service_id or str(svc.id),
+                                            "name": svc.name,
+                                            "description": svc.description or ""
+                                        }
+                                        for svc in services[:5]
+                                    ]
+                                }
+                                businesses.append(business_data)
+                            
+                            logger.info(f"Fallback: Returning {len(businesses)} total active businesses")
+                    else:
+                        logger.debug("DATABASE_URL not set, cannot do fallback search")
+                except Exception as e:
+                    logger.error(f"Fallback search failed: {e}", exc_info=True)
+            
+            # If still no results and we have a query, try without location filter
+            if len(businesses) == 0 and query and location:
+                logger.warning(f"No results with location filter, trying without location for query '{query}'")
+                # Re-run search without location
+                return await self.search_businesses(query=query, category=category, location=None)
+            
+            logger.info(f"Final result: returning {len(businesses)} businesses")
+            if len(businesses) == 0:
+                logger.warning("WARNING: Search returned 0 businesses. This might indicate:")
+                logger.warning("  1. No businesses are registered")
+                logger.warning("  2. Search criteria are too strict")
+                logger.warning("  3. Database/in-memory store is not accessible")
             
             return businesses[:10]  # Limit to 10 results
             

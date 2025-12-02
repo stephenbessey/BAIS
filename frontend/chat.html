@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BAIS Chat</title>
+    <link rel="stylesheet" href="/assets/chat-styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <div class="header-content">
+                <h1>BAIS</h1>
+                <p>AI-powered business discovery and booking</p>
+            </div>
+            <button class="settings-button" id="settingsButton" aria-label="Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3m15.364 6.364l-4.243-4.243m-4.242 0l-4.243 4.243m8.485 0l-4.242 4.242m-4.243-4.242l-4.243 4.243"></path>
+                </svg>
+            </button>
+        </div>
+
+        <div class="config-panel" id="configPanel" style="display: none;">
+            <div class="config-content">
+                <div class="config-header">
+                    <h3>Settings</h3>
+                    <button class="close-config-btn" id="closeConfigBtn" aria-label="Close settings">×</button>
+                </div>
+                
+                <div class="config-section">
+                    <label for="ollamaHost">Ollama Host:</label>
+                    <input type="text" id="ollamaHost" placeholder="http://golem:11434" />
+                    <small>Ollama server address via Tailscale</small>
+                </div>
+                
+                <div class="config-section">
+                    <label for="ollamaModel">Model Name:</label>
+                    <input type="text" id="ollamaModel" placeholder="gpt-oss:120b" />
+                    <small>Available models: gpt-oss:120b or llama4:maverick</small>
+                </div>
+                
+                <button class="save-config-btn" id="saveConfigBtn">Save</button>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages">
+            <div class="welcome-message">
+                <h2>Welcome to BAIS</h2>
+                <p>Start chatting to discover and book with businesses. The AI has access to search and book with all BAIS businesses.</p>
+                <div class="example-queries">
+                    <p>Try asking:</p>
+                    <ul>
+                        <li>Find a med spa in Las Vegas</li>
+                        <li>What services does New Life New Image Med Spa offer?</li>
+                        <li>Book me a Botox appointment</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-input-container">
+            <div class="input-wrapper">
+                <textarea 
+                    id="messageInput" 
+                    placeholder="Message BAIS..."
+                    rows="1"
+                    aria-label="Message input"
+                ></textarea>
+                <button id="sendButton" class="send-button" aria-label="Send message">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="22" y1="2" x2="11" y2="13"></line>
+                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                    </svg>
+                </button>
+            </div>
+            <div class="input-footer">
+                <span class="status-text" id="statusText"></span>
+                <span class="api-status" id="apiStatus"></span>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/js/chat.js"></script>
+</body>
+</html>

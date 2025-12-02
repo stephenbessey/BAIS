@@ -83,6 +83,33 @@ try:
         allow_headers=["*"],
     )
     
+    # Add static file serving for frontend
+    try:
+        from fastapi.staticfiles import StaticFiles
+        from fastapi.responses import FileResponse
+        from pathlib import Path
+        
+        # Get project root (3 levels up from this file)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        frontend_path = os.path.join(project_root, "frontend")
+        
+        if os.path.exists(frontend_path):
+            # Mount static files (assets, js, etc.)
+            app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
+            app.mount("/js", StaticFiles(directory=os.path.join(frontend_path, "js")), name="js")
+            
+            # Serve chat.html at /chat
+            @app.get("/chat")
+            async def serve_chat():
+                chat_file = os.path.join(frontend_path, "chat.html")
+                if os.path.exists(chat_file):
+                    return FileResponse(chat_file)
+                return {"error": "Chat interface not found"}
+            
+            logger.info(f"Serving frontend from {frontend_path}")
+    except Exception as e:
+        logger.warning(f"Could not set up static file serving: {e}")
+    
     logger.info("Created FastAPI app with CORS middleware")
     
     # Import and configure simplified routes
@@ -127,6 +154,25 @@ try:
     except ImportError as e:
         logger.warning(f"Could not import universal webhook routes: {e}")
         import_errors.append(f"Universal webhooks import error: {str(e)}")
+        logger.warning(f"Import error details: {traceback.format_exc()}")
+    
+    # Import and configure Chat Endpoint
+    try:
+        # Add project root to path for proper imports
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        
+        # Use absolute import from project root
+        from backend.production.api.v1.chat_endpoint import router as chat_router
+        
+        # Include chat routes
+        app.include_router(chat_router)
+        logger.info("Successfully imported and configured Chat endpoint routes")
+        
+    except ImportError as e:
+        logger.warning(f"Could not import chat endpoint routes: {e}")
+        import_errors.append(f"Chat endpoint import error: {str(e)}")
         logger.warning(f"Import error details: {traceback.format_exc()}")
     
     logger.info("Successfully created BAIS application with available routes")
