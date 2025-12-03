@@ -45,9 +45,9 @@ def extract_json_from_markdown(file_path: Path) -> Dict[str, Any]:
 def prepare_registration_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Prepare the business registration data according to BusinessRegistrationRequest schema.
-    Removes extra fields that aren't part of the API model.
+    Includes all optional fields for complete registration.
     """
-    # Extract only the required fields
+    # Extract required and optional fields
     registration_data = {
         "business_name": data["business_name"],
         "business_type": data["business_type"],
@@ -56,9 +56,13 @@ def prepare_registration_data(data: Dict[str, Any]) -> Dict[str, Any]:
         "services_config": data["services_config"]
     }
     
-    # Note: business_info, integration, and ap2_config are not part of
-    # BusinessRegistrationRequest, but they might be stored separately
-    # The API will handle validation
+    # Include optional fields if present
+    if "business_info" in data:
+        registration_data["business_info"] = data["business_info"]
+    if "integration" in data:
+        registration_data["integration"] = data["integration"]
+    if "ap2_config" in data:
+        registration_data["ap2_config"] = data["ap2_config"]
     
     return registration_data
 

@@ -50,6 +50,9 @@ class BusinessRegistrationRequest(BaseModel):
     business_info: Optional[Dict[str, Any]] = None
     integration: Optional[Dict[str, Any]] = None
     ap2_config: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        extra = "allow"  # Allow extra fields for backward compatibility
 
 
 @api_router.post("/businesses", tags=["Business Management"])
@@ -97,9 +100,23 @@ async def register_business(request: BusinessRegistrationRequest):
                         ).first()
                         
                         if existing:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Business with name '{request.business_name}' already exists"
+                            # Business already exists - return success with existing business info
+                            logger.info(f"Business '{request.business_name}' already exists in database (ID: {existing.external_id})")
+                            db_saved = True
+                            # Update existing business if needed (optional - can be enhanced later)
+                            # For now, just return success
+                            session.commit()
+                            return JSONResponse(
+                                status_code=200,
+                                content={
+                                    "business_id": business_id,
+                                    "status": "ready",
+                                    "message": "Business already registered",
+                                    "setup_complete": True,
+                                    "database_persisted": True,
+                                    "already_exists": True,
+                                    "businesses_registered": len(BUSINESS_STORE) + 1
+                                }
                             )
                         
                         # Parse established date

@@ -245,6 +245,150 @@ try:
         db_thread = threading.Thread(target=init_database_background, daemon=True)
         db_thread.start()
         logger.info("Database initialization started in background thread")
+        
+        # Register default business if not exists (in background after DB init)
+        def register_default_business():
+            """Register default business if database is available and business doesn't exist"""
+            import time
+            # Wait a bit for database to be ready
+            time.sleep(10)  # Give database more time to initialize
+            try:
+                database_url = os.getenv("DATABASE_URL")
+                if not database_url or database_url == "not_set":
+                    logger.info("No DATABASE_URL configured, skipping default business registration")
+                    return
+                
+                # Try to import database models
+                DatabaseManager = None
+                Business = None
+                BusinessService = None
+                try:
+                    from core.database_models import DatabaseManager, Business, BusinessService
+                except ImportError:
+                    try:
+                        from .core.database_models import DatabaseManager, Business, BusinessService
+                    except ImportError:
+                        try:
+                            from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                        except ImportError:
+                            logger.warning("Could not import database models for default business registration")
+                            return
+                
+                if not DatabaseManager:
+                    return
+                
+                db_manager = DatabaseManager(database_url)
+                with db_manager.get_session() as session:
+                    # Check if New Life New Image Med Spa exists
+                    existing = session.query(Business).filter(
+                        Business.external_id == "new-life-new-image-med-spa"
+                    ).first()
+                    
+                    if existing:
+                        logger.info("Default business 'New Life New Image Med Spa' already registered in database")
+                        return
+                    
+                    # Try to register from customer file
+                    try:
+                        import json
+                        import re
+                        import uuid
+                        from pathlib import Path
+                        from datetime import datetime as dt
+                        
+                        # Find customer file
+                        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                        customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+                        
+                        if customer_file.exists():
+                            logger.info(f"Found customer file, registering default business...")
+                            # Read and parse JSON
+                            content = customer_file.read_text()
+                            json_match = re.search(r'```json\s*\n(.*?)\n```', content, re.DOTALL)
+                            if json_match:
+                                data = json.loads(json_match.group(1))
+                            else:
+                                data = json.loads(content)
+                            
+                            # Register business directly in database
+                            business_id = "new-life-new-image-med-spa"
+                            business_id_str = str(uuid.uuid4())
+                            
+                            # Parse established date
+                            established_date = None
+                            if data.get("business_info") and "established" in data["business_info"]:
+                                try:
+                                    established_date = dt.fromisoformat(data["business_info"]["established"].replace("Z", "+00:00"))
+                                except:
+                                    pass
+                            
+                            # Create business
+                            business = Business(
+                                id=business_id_str,
+                                external_id=business_id,
+                                name=data["business_name"],
+                                business_type=data["business_type"],
+                                description=data.get("business_info", {}).get("description", ""),
+                                address=data["location"].get("address", ""),
+                                city=data["location"].get("city", ""),
+                                state=data["location"].get("state", ""),
+                                postal_code=data["location"].get("postal_code", ""),
+                                country=data["location"].get("country", "US"),
+                                timezone=data["location"].get("timezone", "UTC"),
+                                website=data["contact_info"].get("website", ""),
+                                phone=data["contact_info"].get("phone", ""),
+                                email=data["contact_info"].get("email", ""),
+                                established_date=established_date,
+                                capacity=data.get("business_info", {}).get("capacity"),
+                                mcp_endpoint=f"/api/v1/businesses/{business_id}/mcp",
+                                a2a_endpoint=f"/api/v1/businesses/{business_id}/a2a",
+                                webhook_endpoint=data.get("integration", {}).get("webhook_endpoint"),
+                                ap2_enabled=data.get("ap2_config", {}).get("enabled", False),
+                                ap2_verification_required=data.get("ap2_config", {}).get("verification_required", True),
+                                status="active"
+                            )
+                            
+                            session.add(business)
+                            session.flush()
+                            
+                            # Add services
+                            for svc_config in data.get("services_config", []):
+                                service = BusinessService(
+                                    business_id=business.id,
+                                    service_id=svc_config.get("id", ""),
+                                    name=svc_config.get("name", ""),
+                                    description=svc_config.get("description", ""),
+                                    category=svc_config.get("category", ""),
+                                    workflow_pattern=svc_config.get("workflow_pattern", "booking_confirmation_payment"),
+                                    workflow_steps=svc_config.get("workflow_steps", []),
+                                    parameters_schema=svc_config.get("parameters", {}),
+                                    availability_endpoint=svc_config.get("availability", {}).get("endpoint", ""),
+                                    real_time_availability=svc_config.get("availability", {}).get("real_time", True),
+                                    cache_timeout_seconds=svc_config.get("availability", {}).get("cache_timeout_seconds", 300),
+                                    advance_booking_days=svc_config.get("availability", {}).get("advance_booking_days", 365),
+                                    cancellation_policy=svc_config.get("cancellation_policy", {}),
+                                    payment_config=svc_config.get("payment_config", {}),
+                                    modification_fee=svc_config.get("policies", {}).get("modification_fee", 0.0),
+                                    no_show_penalty=svc_config.get("policies", {}).get("no_show_penalty", 0.0),
+                                    enabled=True
+                                )
+                                session.add(service)
+                            
+                            session.commit()
+                            logger.info(f"✅ Default business 'New Life New Image Med Spa' registered successfully in database")
+                        else:
+                            logger.info(f"Customer file not found at {customer_file}, skipping default registration")
+                    except Exception as e:
+                        logger.warning(f"Could not auto-register default business: {e}")
+                        import traceback
+                        logger.debug(f"Registration error: {traceback.format_exc()}")
+            except Exception as e:
+                logger.warning(f"Default business registration check failed: {e}")
+        
+        # Start default business registration in background
+        default_biz_thread = threading.Thread(target=register_default_business, daemon=True)
+        default_biz_thread.start()
+        logger.info("Default business registration check started in background")
     
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")
