@@ -531,6 +531,26 @@ def api_status():
 @app.get("/diagnostics")
 def get_diagnostics():
     """Comprehensive diagnostic endpoint"""
+    # Check all possible DATABASE_URL variable names
+    db_url = os.getenv("DATABASE_URL")
+    postgres_url = os.getenv("POSTGRES_URL")
+    pgdatabase_url = os.getenv("PGDATABASE_URL")
+    pg_url = os.getenv("PG_URL")
+    
+    # Check Railway-specific variables
+    railway_db_url = os.getenv("RAILWAY_DATABASE_URL")
+    
+    # Mask passwords for security
+    def mask_url(url):
+        if not url:
+            return None
+        try:
+            if '@' in url:
+                return f"postgresql://***@{url.split('@')[1]}"
+            return "postgresql://***"
+        except:
+            return "***"
+    
     return {
         "system_info": system_info,
         "import_errors": import_errors,
@@ -540,7 +560,16 @@ def get_diagnostics():
         "environment_check": {
             "required_env_vars": {
                 "PORT": os.getenv("PORT", "not_set"),
-                "DATABASE_URL": "set" if os.getenv("DATABASE_URL") else "not_set",
+                "DATABASE_URL": "set" if db_url else "not_set",
+                "DATABASE_URL_value": mask_url(db_url),
+                "POSTGRES_URL": "set" if postgres_url else "not_set",
+                "POSTGRES_URL_value": mask_url(postgres_url),
+                "PGDATABASE_URL": "set" if pgdatabase_url else "not_set",
+                "PGDATABASE_URL_value": mask_url(pgdatabase_url),
+                "PG_URL": "set" if pg_url else "not_set",
+                "PG_URL_value": mask_url(pg_url),
+                "RAILWAY_DATABASE_URL": "set" if railway_db_url else "not_set",
+                "RAILWAY_DATABASE_URL_value": mask_url(railway_db_url),
                 "REDIS_URL": "set" if os.getenv("REDIS_URL") else "not_set"
             },
             "optional_env_vars": {
