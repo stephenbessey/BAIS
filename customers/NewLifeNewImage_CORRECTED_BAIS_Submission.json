@@ -1,0 +1,319 @@
+{
+  "business_name": "New Life New Image Med Spa",
+  "business_type": "medical_spa",
+  "contact_info": {
+    "phone": "+1-702-555-0123",
+    "email": "contact@newlifenewimage.com",
+    "website": "https://www.newlifenewimage.com"
+  },
+  "location": {
+    "address": "4200 S Rainbow Blvd, Suite 100",
+    "city": "Las Vegas",
+    "state": "NV",
+    "postal_code": "89103",
+    "country": "US",
+    "timezone": "America/Los_Angeles"
+  },
+  "business_info": {
+    "description": "Premier medical spa in Las Vegas offering advanced aesthetic treatments, medical-grade skincare, and wellness services. Our experienced team provides personalized treatments in a luxurious, state-of-the-art facility.",
+    "established": "2015-03-15T00:00:00Z",
+    "capacity": 8,
+    "specialties": [
+      "Botox and Fillers",
+      "Laser Treatments",
+      "Medical-Grade Facials",
+      "Body Contouring",
+      "Skin Rejuvenation"
+    ]
+  },
+  "services_config": [
+    {
+      "id": "botox-treatment",
+      "name": "Botox Treatment",
+      "description": "FDA-approved botulinum toxin injections to reduce fine lines and wrinkles. Personalized treatment plans targeting forehead lines, crow's feet, and frown lines.",
+      "category": "injectable",
+      "workflow_pattern": "consultation_booking_confirmation_payment",
+      "workflow_steps": [
+        "consultation_required",
+        "booking",
+        "confirmation",
+        "payment"
+      ],
+      "parameters": {
+        "treatment_areas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["forehead", "crows_feet", "frown_lines", "bunny_lines"]
+          },
+          "description": "Areas to be treated with Botox"
+        },
+        "units_estimate": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 60,
+          "description": "Estimated units needed (determined during consultation)"
+        }
+      },
+      "availability": {
+        "endpoint": "/api/availability/botox",
+        "real_time": true,
+        "cache_timeout_seconds": 300,
+        "advance_booking_days": 90
+      },
+      "cancellation_policy": {
+        "allowed": true,
+        "notice_hours": 24,
+        "fee_percentage": 50
+      },
+      "payment_config": {
+        "deposit_required": true,
+        "deposit_amount": 100.0,
+        "payment_methods": ["credit_card", "debit_card"],
+        "pricing": {
+          "base_price": 12.0,
+          "unit": "per_unit",
+          "typical_range": "240-600"
+        }
+      },
+      "policies": {
+        "modification_fee": 25.0,
+        "no_show_penalty": 100.0
+      }
+    },
+    {
+      "id": "dermal-fillers",
+      "name": "Dermal Fillers",
+      "description": "Hyaluronic acid-based dermal fillers to restore volume, smooth wrinkles, and enhance facial contours. Popular for lip augmentation, cheek enhancement, and nasolabial fold reduction.",
+      "category": "injectable",
+      "workflow_pattern": "consultation_booking_confirmation_payment",
+      "workflow_steps": [
+        "consultation_required",
+        "booking",
+        "confirmation",
+        "payment"
+      ],
+      "parameters": {
+        "filler_type": {
+          "type": "string",
+          "enum": ["juvederm", "restylane", "radiesse", "sculptra"],
+          "description": "Type of dermal filler"
+        },
+        "treatment_areas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["lips", "cheeks", "nasolabial_folds", "marionette_lines", "under_eyes"]
+          },
+          "description": "Areas to be treated"
+        },
+        "syringes_estimate": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Estimated syringes needed"
+        }
+      },
+      "availability": {
+        "endpoint": "/api/availability/fillers",
+        "real_time": true,
+        "cache_timeout_seconds": 300,
+        "advance_booking_days": 90
+      },
+      "cancellation_policy": {
+        "allowed": true,
+        "notice_hours": 24,
+        "fee_percentage": 50
+      },
+      "payment_config": {
+        "deposit_required": true,
+        "deposit_amount": 150.0,
+        "payment_methods": ["credit_card", "debit_card"],
+        "pricing": {
+          "base_price": 650.0,
+          "unit": "per_syringe",
+          "typical_range": "650-2600"
+        }
+      },
+      "policies": {
+        "modification_fee": 25.0,
+        "no_show_penalty": 150.0
+      }
+    },
+    {
+      "id": "laser-hair-removal",
+      "name": "Laser Hair Removal",
+      "description": "Safe and effective permanent hair reduction using advanced laser technology. Suitable for all skin types with minimal discomfort.",
+      "category": "laser_treatment",
+      "workflow_pattern": "booking_confirmation_payment",
+      "workflow_steps": [
+        "booking",
+        "confirmation",
+        "payment"
+      ],
+      "parameters": {
+        "treatment_area": {
+          "type": "string",
+          "enum": ["face", "underarms", "bikini", "brazilian", "legs_full", "legs_half", "back", "chest"],
+          "description": "Body area for treatment"
+        },
+        "session_number": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Session number in treatment package"
+        },
+        "skin_type": {
+          "type": "string",
+          "enum": ["I", "II", "III", "IV", "V", "VI"],
+          "description": "Fitzpatrick skin type classification"
+        }
+      },
+      "availability": {
+        "endpoint": "/api/availability/laser",
+        "real_time": true,
+        "cache_timeout_seconds": 600,
+        "advance_booking_days": 120
+      },
+      "cancellation_policy": {
+        "allowed": true,
+        "notice_hours": 12,
+        "fee_percentage": 25
+      },
+      "payment_config": {
+        "deposit_required": false,
+        "payment_methods": ["credit_card", "debit_card", "financing"],
+        "pricing": {
+          "base_price": 150.0,
+          "unit": "per_session",
+          "typical_range": "150-500"
+        }
+      },
+      "policies": {
+        "modification_fee": 0.0,
+        "no_show_penalty": 50.0
+      }
+    },
+    {
+      "id": "hydrafacial",
+      "name": "HydraFacial MD",
+      "description": "Medical-grade facial treatment combining cleansing, exfoliation, extraction, hydration, and antioxidant protection. Customizable for all skin types with no downtime.",
+      "category": "facial_treatment",
+      "workflow_pattern": "booking_confirmation_payment",
+      "workflow_steps": [
+        "booking",
+        "confirmation",
+        "payment"
+      ],
+      "parameters": {
+        "treatment_level": {
+          "type": "string",
+          "enum": ["signature", "deluxe", "platinum"],
+          "description": "HydraFacial treatment level"
+        },
+        "add_ons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["led_therapy", "lymphatic_drainage", "dermabuilder", "britenol_boost"]
+          },
+          "description": "Optional treatment enhancements"
+        }
+      },
+      "availability": {
+        "endpoint": "/api/availability/hydrafacial",
+        "real_time": true,
+        "cache_timeout_seconds": 600,
+        "advance_booking_days": 60
+      },
+      "cancellation_policy": {
+        "allowed": true,
+        "notice_hours": 4,
+        "fee_percentage": 0
+      },
+      "payment_config": {
+        "deposit_required": false,
+        "payment_methods": ["credit_card", "debit_card"],
+        "pricing": {
+          "base_price": 199.0,
+          "unit": "per_treatment",
+          "typical_range": "199-349"
+        }
+      },
+      "policies": {
+        "modification_fee": 0.0,
+        "no_show_penalty": 75.0
+      }
+    },
+    {
+      "id": "coolsculpting",
+      "name": "CoolSculpting Body Contouring",
+      "description": "FDA-cleared non-invasive fat reduction treatment using controlled cooling technology. Target stubborn fat areas without surgery or downtime.",
+      "category": "body_contouring",
+      "workflow_pattern": "consultation_booking_confirmation_payment",
+      "workflow_steps": [
+        "consultation_required",
+        "booking",
+        "confirmation",
+        "payment"
+      ],
+      "parameters": {
+        "treatment_areas": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["abdomen", "flanks", "thighs_inner", "thighs_outer", "arms", "back", "chin"]
+          },
+          "description": "Body areas for treatment"
+        },
+        "cycles_per_area": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "description": "Treatment cycles per area"
+        }
+      },
+      "availability": {
+        "endpoint": "/api/availability/coolsculpting",
+        "real_time": true,
+        "cache_timeout_seconds": 600,
+        "advance_booking_days": 120
+      },
+      "cancellation_policy": {
+        "allowed": true,
+        "notice_hours": 48,
+        "fee_percentage": 25
+      },
+      "payment_config": {
+        "deposit_required": true,
+        "deposit_amount": 500.0,
+        "payment_methods": ["credit_card", "debit_card", "financing"],
+        "pricing": {
+          "base_price": 750.0,
+          "unit": "per_cycle",
+          "typical_range": "750-4000"
+        }
+      },
+      "policies": {
+        "modification_fee": 50.0,
+        "no_show_penalty": 500.0
+      }
+    }
+  ],
+  "integration": {
+    "webhook_endpoint": "https://newlifenewimage.com/webhooks/bais",
+    "webhook_secret": "demo_webhook_secret_12345",
+    "supported_events": [
+      "booking.created",
+      "booking.confirmed",
+      "booking.cancelled",
+      "payment.completed"
+    ]
+  },
+  "ap2_config": {
+    "enabled": true,
+    "verification_required": true,
+    "auto_confirm_bookings": false,
+    "notification_email": "bookings@newlifenewimage.com"
+  }
+}
