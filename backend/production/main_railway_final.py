@@ -261,7 +261,8 @@ try:
     if database_url and database_url.strip() and database_url != "not_set":
         # Log that we found DATABASE_URL (mask password)
         masked_url = database_url.split('@')[1] if '@' in database_url else "***"
-        logger.info(f"📊 DATABASE_URL found for initialization: postgresql://***@{masked_url}")
+        logger.info(f"📊 DATABASE_URL found: postgresql://***@{masked_url}")
+        
         import threading
         
         def init_database_background():
@@ -292,6 +293,20 @@ try:
                         # If connection fails, it will raise an exception which we catch
                         db_manager.create_tables()
                         logger.info("Database tables initialized successfully")
+                        
+                        # Verify database connection by checking business count
+                        try:
+                            from core.database_models import Business
+                        except ImportError:
+                            try:
+                                from .core.database_models import Business
+                            except ImportError:
+                                from backend.production.core.database_models import Business
+                        
+                        with db_manager.get_session() as session:
+                            business_count = session.query(Business).count()
+                            active_count = session.query(Business).filter(Business.status == "active").count()
+                            logger.info(f"✅ Database connection verified: {business_count} businesses in database ({active_count} active)")
                     except Exception as db_init_error:
                         logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
                         import traceback
