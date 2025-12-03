@@ -377,10 +377,13 @@ class BAISUniversalToolHandler:
             except Exception as db_error:
                 logger.debug(f"Database query failed, using fallback: {db_error}")
                 # Continue to fallback logic
+                db_checked = False  # Mark that we didn't successfully check database
             
             # Only check in-memory BUSINESS_STORE if database is not available
             # Database is the source of truth - in-memory is only a fallback
+            # ALWAYS check in-memory if no database results (even if db_checked is True but returned 0 results)
             if not db_checked or len(businesses) == 0:
+                logger.info(f"Checking in-memory store: db_checked={db_checked}, businesses_found={len(businesses)}")
                 # Only use in-memory store if we don't have database access
                 try:
                     # Try multiple import paths for shared_storage
@@ -409,10 +412,11 @@ class BAISUniversalToolHandler:
                                     pass
                     
                     if simple_store and len(simple_store) > 0:
-                        logger.info(f"Checking in-memory BUSINESS_STORE (fallback only) with {len(simple_store)} businesses")
-                        logger.info(f"Business IDs in store: {list(simple_store.keys())}")
+                        logger.info(f"✅ Checking in-memory BUSINESS_STORE (fallback only) with {len(simple_store)} businesses")
+                        logger.info(f"✅ Business IDs in store: {list(simple_store.keys())}")
                         logger.warning("Using in-memory store as fallback - database should be primary source")
                         for business_id, business_data in simple_store.items():
+                            logger.info(f"🔍 Processing business from store: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
                             logger.info(f"Checking business: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
                             # Skip if already in results
                             if any(b.get("business_id") == business_id for b in businesses):
@@ -524,6 +528,7 @@ class BAISUniversalToolHandler:
                                     logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' matched location '{location_lower}'")
                             
                             if matches:
+                                logger.info(f"✅ Business '{business_data.get('business_name', 'Unknown')}' MATCHED all criteria - adding to results")
                                 # Get services
                                 services = [
                                     {
@@ -550,7 +555,9 @@ class BAISUniversalToolHandler:
                                     "services": services
                                 }
                                 businesses.append(business_result)
-                                logger.info(f"✓ Added business from in-memory store: {business_data.get('business_name')} (ID: {business_id})")
+                                logger.info(f"✅ Added business from in-memory store: {business_data.get('business_name')} (ID: {business_id})")
+                            else:
+                                logger.debug(f"❌ Business '{business_data.get('business_name', 'Unknown')}' did NOT match criteria")
                     
                         logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
                     else:

@@ -7,7 +7,7 @@ Enhanced with Universal LLM Integration
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import logging
 import uuid
 from datetime import datetime
@@ -55,6 +55,122 @@ class BusinessRegistrationRequest(BaseModel):
         extra = "allow"  # Allow extra fields for backward compatibility
 
 
+def register_business_to_database(request: BusinessRegistrationRequest, database_url: str) -> Tuple[bool, Optional[str]]:
+    """
+    Core business registration logic - saves to database.
+    Returns: (success: bool, business_id: str or None)
+    This function is idempotent - if business exists, returns success without error.
+    """
+    import os
+    from datetime import datetime as dt
+    
+    try:
+        # Generate business ID
+        business_id = generate_business_id(request.business_name)
+        
+        # Try multiple import paths for database models
+        DatabaseManager = None
+        Business = None
+        BusinessService = None
+        
+        try:
+            from ..core.database_models import DatabaseManager, Business, BusinessService
+        except (ImportError, NameError):
+            try:
+                from core.database_models import DatabaseManager, Business, BusinessService
+            except (ImportError, NameError):
+                try:
+                    from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                except (ImportError, NameError):
+                    logger.warning("Could not import database models")
+                    return (False, None)
+        
+        if not DatabaseManager or not Business or not BusinessService:
+            return (False, None)
+        
+        db_manager = DatabaseManager(database_url)
+        with db_manager.get_session() as session:
+            # Check if business already exists (idempotent)
+            existing = session.query(Business).filter(
+                Business.external_id == business_id
+            ).first()
+            
+            if existing:
+                logger.info(f"Business '{request.business_name}' already exists in database (ID: {existing.external_id})")
+                return (True, business_id)  # Already registered - success!
+            
+            # Parse established date
+            established_date = None
+            if request.business_info and "established" in request.business_info:
+                try:
+                    established_date = dt.fromisoformat(request.business_info["established"].replace("Z", "+00:00"))
+                except:
+                    pass
+            
+            # Create business in database
+            business_id_str = str(uuid.uuid4())
+            business = Business(
+                id=business_id_str,
+                external_id=business_id,
+                name=request.business_name,
+                business_type=request.business_type,
+                description=request.business_info.get("description", "") if request.business_info else "",
+                address=request.location.get("address", ""),
+                city=request.location.get("city", ""),
+                state=request.location.get("state", ""),
+                postal_code=request.location.get("postal_code", ""),
+                country=request.location.get("country", "US"),
+                timezone=request.location.get("timezone", "UTC"),
+                website=request.contact_info.get("website", ""),
+                phone=request.contact_info.get("phone", ""),
+                email=request.contact_info.get("email", ""),
+                established_date=established_date,
+                capacity=request.business_info.get("capacity") if request.business_info else None,
+                mcp_endpoint=f"/api/v1/businesses/{business_id}/mcp",
+                a2a_endpoint=f"/api/v1/businesses/{business_id}/a2a",
+                webhook_endpoint=request.integration.get("webhook_endpoint") if request.integration else None,
+                ap2_enabled=request.ap2_config.get("enabled", False) if request.ap2_config else False,
+                ap2_verification_required=request.ap2_config.get("verification_required", True) if request.ap2_config else True,
+                status="active"
+            )
+            
+            session.add(business)
+            session.flush()
+            
+            # Add services
+            for svc_config in request.services_config:
+                service = BusinessService(
+                    business_id=business.id,
+                    service_id=svc_config.get("id", ""),
+                    name=svc_config.get("name", ""),
+                    description=svc_config.get("description", ""),
+                    category=svc_config.get("category", ""),
+                    workflow_pattern=svc_config.get("workflow_pattern", "booking_confirmation_payment"),
+                    workflow_steps=svc_config.get("workflow_steps", []),
+                    parameters_schema=svc_config.get("parameters", {}),
+                    availability_endpoint=svc_config.get("availability", {}).get("endpoint", ""),
+                    real_time_availability=svc_config.get("availability", {}).get("real_time", True),
+                    cache_timeout_seconds=svc_config.get("availability", {}).get("cache_timeout_seconds", 300),
+                    advance_booking_days=svc_config.get("availability", {}).get("advance_booking_days", 365),
+                    cancellation_policy=svc_config.get("cancellation_policy", {}),
+                    payment_config=svc_config.get("payment_config", {}),
+                    modification_fee=svc_config.get("policies", {}).get("modification_fee", 0.0),
+                    no_show_penalty=svc_config.get("policies", {}).get("no_show_penalty", 0.0),
+                    enabled=True
+                )
+                session.add(service)
+            
+            session.commit()
+            logger.info(f"✅ Business saved to database: {request.business_name} (ID: {business_id})")
+            return (True, business_id)
+            
+    except Exception as e:
+        logger.error(f"Database registration failed: {e}")
+        import traceback
+        logger.error(f"Error details: {traceback.format_exc()}")
+        return (False, None)
+
+
 @api_router.post("/businesses", tags=["Business Management"])
 async def register_business(request: BusinessRegistrationRequest):
     """Register a new business - stores in database and memory for immediate discoverability"""
@@ -78,120 +194,32 @@ async def register_business(request: BusinessRegistrationRequest):
         if database_url and database_url.strip() and database_url != "not_set":
             logger.info(f"💾 Saving business to Railway database: {request.business_name}")
             try:
-                # Try multiple import paths for database models
-                DatabaseManager = None
-                Business = None
-                BusinessService = None
+                # Use shared registration function (idempotent)
+                db_success, registered_business_id = register_business_to_database(request, database_url)
                 
-                try:
-                    from ..core.database_models import DatabaseManager, Business, BusinessService
-                except (ImportError, NameError) as e1:
-                    logger.debug(f"Relative import failed: {e1}")
-                    try:
-                        from core.database_models import DatabaseManager, Business, BusinessService
-                    except (ImportError, NameError) as e2:
-                        logger.debug(f"Absolute import failed: {e2}")
-                        try:
-                            from backend.production.core.database_models import DatabaseManager, Business, BusinessService
-                        except (ImportError, NameError) as e3:
-                            logger.warning(f"All database model imports failed: {e3}")
-                            DatabaseManager = None
-                
-                if DatabaseManager and Business and BusinessService:
-                    db_manager = DatabaseManager(database_url)
-                    with db_manager.get_session() as session:
-                        # Check if business already exists
-                        existing = session.query(Business).filter(
-                            Business.external_id == business_id
-                        ).first()
-                        
-                        if existing:
-                            # Business already exists - return success with existing business info
-                            logger.info(f"Business '{request.business_name}' already exists in database (ID: {existing.external_id})")
-                            db_saved = True
-                            # Update existing business if needed (optional - can be enhanced later)
-                            # For now, just return success
-                            session.commit()
-                            return JSONResponse(
-                                status_code=200,
-                                content={
-                                    "business_id": business_id,
-                                    "status": "ready",
-                                    "message": "Business already registered",
-                                    "setup_complete": True,
-                                    "database_persisted": True,
-                                    "already_exists": True,
-                                    "businesses_registered": len(BUSINESS_STORE) + 1
-                                }
-                            )
-                        
-                        # Parse established date
-                        established_date = None
-                        if request.business_info and "established" in request.business_info:
-                            try:
-                                established_date = dt.fromisoformat(request.business_info["established"].replace("Z", "+00:00"))
-                            except:
-                                pass
-                        
-                        # Create business in database (use String ID, not UUID)
-                        business_id_str = str(uuid.uuid4())  # Generate UUID string for database
-                        business = Business(
-                            id=business_id_str,
-                            external_id=business_id,
-                            name=request.business_name,
-                            business_type=request.business_type,
-                            description=request.business_info.get("description", "") if request.business_info else "",
-                            address=request.location.get("address", ""),
-                            city=request.location.get("city", ""),
-                            state=request.location.get("state", ""),
-                            postal_code=request.location.get("postal_code", ""),
-                            country=request.location.get("country", "US"),
-                            timezone=request.location.get("timezone", "UTC"),
-                            website=request.contact_info.get("website", ""),
-                            phone=request.contact_info.get("phone", ""),
-                            email=request.contact_info.get("email", ""),
-                            established_date=established_date,
-                            capacity=request.business_info.get("capacity") if request.business_info else None,
-                            mcp_endpoint=f"/api/v1/businesses/{business_id}/mcp",
-                            a2a_endpoint=f"/api/v1/businesses/{business_id}/a2a",
-                            webhook_endpoint=request.integration.get("webhook_endpoint") if request.integration else None,
-                            ap2_enabled=request.ap2_config.get("enabled", False) if request.ap2_config else False,
-                            ap2_verification_required=request.ap2_config.get("verification_required", True) if request.ap2_config else True,
-                            status="active"
-                        )
-                        
-                        session.add(business)
-                        session.flush()  # Get the business ID
-                        
-                        # Add services
-                        for svc_config in request.services_config:
-                            service = BusinessService(
-                                business_id=business.id,
-                                service_id=svc_config.get("id", ""),
-                                name=svc_config.get("name", ""),
-                                description=svc_config.get("description", ""),
-                                category=svc_config.get("category", ""),
-                                workflow_pattern=svc_config.get("workflow_pattern", "booking_confirmation_payment"),
-                                workflow_steps=svc_config.get("workflow_steps", []),
-                                parameters_schema=svc_config.get("parameters", {}),
-                                availability_endpoint=svc_config.get("availability", {}).get("endpoint", ""),
-                                real_time_availability=svc_config.get("availability", {}).get("real_time", True),
-                                cache_timeout_seconds=svc_config.get("availability", {}).get("cache_timeout_seconds", 300),
-                                advance_booking_days=svc_config.get("availability", {}).get("advance_booking_days", 365),
-                                cancellation_policy=svc_config.get("cancellation_policy", {}),
-                                payment_config=svc_config.get("payment_config", {}),
-                                modification_fee=svc_config.get("policies", {}).get("modification_fee", 0.0),
-                                no_show_penalty=svc_config.get("policies", {}).get("no_show_penalty", 0.0),
-                                enabled=True
-                            )
-                            session.add(service)
-                        
-                        session.commit()
-                        db_saved = True
-                        logger.info(f"✅ Business saved to Railway database: {request.business_name} (ID: {business_id}, DB ID: {business_id_str})")
+                if db_success:
+                    db_saved = True
+                    if registered_business_id == business_id:
+                        # Newly registered
+                        logger.info(f"✅ Business saved to Railway database: {request.business_name} (ID: {business_id})")
                         logger.info(f"   Business is now discoverable through all AI platforms via BAIS tools")
+                    else:
+                        # Already existed
+                        logger.info(f"✅ Business already registered in database: {request.business_name} (ID: {business_id})")
+                        return JSONResponse(
+                            status_code=200,
+                            content={
+                                "business_id": business_id,
+                                "status": "ready",
+                                "message": "Business already registered",
+                                "setup_complete": True,
+                                "database_persisted": True,
+                                "already_exists": True,
+                                "businesses_registered": len(BUSINESS_STORE) + 1
+                            }
+                        )
                 else:
-                    logger.error("❌ Database models not available - business will NOT persist! This should not happen on Railway.")
+                    logger.error("❌ Database registration failed")
             except HTTPException:
                 raise
             except Exception as db_error:

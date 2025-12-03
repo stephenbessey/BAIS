@@ -312,144 +312,129 @@ try:
         def register_default_business():
             """Register default business if database is available and business doesn't exist"""
             import time
-            # Wait a bit for database to be ready
-            time.sleep(10)  # Give database more time to initialize
-            try:
-                database_url = os.getenv("DATABASE_URL")
-                # Try alternative names Railway might use
-                if not database_url or database_url == "not_set":
-                    database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
-                
-                if not database_url or database_url.strip() == "" or database_url == "not_set":
-                    logger.info("No DATABASE_URL configured, skipping default business registration")
-                    return
-                
-                # Try to import database models
-                DatabaseManager = None
-                Business = None
-                BusinessService = None
+            import asyncio
+            import json
+            from pathlib import Path
+            
+            # Retry logic: try multiple times with increasing delays
+            max_retries = 5
+            for attempt in range(max_retries):
                 try:
-                    from core.database_models import DatabaseManager, Business, BusinessService
-                except ImportError:
+                    # Wait for database to be ready (exponential backoff)
+                    wait_time = 5 + (attempt * 5)  # 5s, 10s, 15s, 20s, 25s
+                    if attempt > 0:
+                        logger.info(f"Retrying default business registration (attempt {attempt + 1}/{max_retries}) after {wait_time}s...")
+                    time.sleep(wait_time)
+                    
+                    database_url = os.getenv("DATABASE_URL")
+                    # Try alternative names Railway might use
+                    if not database_url or database_url == "not_set":
+                        database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+                    
+                    if not database_url or database_url.strip() == "" or database_url == "not_set":
+                        if attempt == max_retries - 1:
+                            logger.info("No DATABASE_URL configured after all retries, skipping default business registration")
+                        continue
+                    
+                    # Try to import database models
+                    DatabaseManager = None
+                    Business = None
                     try:
-                        from .core.database_models import DatabaseManager, Business, BusinessService
+                        from core.database_models import DatabaseManager, Business
                     except ImportError:
                         try:
-                            from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                            from .core.database_models import DatabaseManager, Business
                         except ImportError:
-                            logger.warning("Could not import database models for default business registration")
-                            return
-                
-                if not DatabaseManager:
-                    return
-                
-                db_manager = DatabaseManager(database_url)
-                with db_manager.get_session() as session:
-                    # Check if New Life New Image Med Spa exists
-                    existing = session.query(Business).filter(
-                        Business.external_id == "new-life-new-image-med-spa"
-                    ).first()
+                            try:
+                                from backend.production.core.database_models import DatabaseManager, Business
+                            except ImportError:
+                                if attempt == max_retries - 1:
+                                    logger.warning("Could not import database models for default business registration")
+                                continue
                     
-                    if existing:
-                        logger.info("Default business 'New Life New Image Med Spa' already registered in database")
+                    if not DatabaseManager or not Business:
+                        continue
+                    
+                    # Test database connection
+                    try:
+                        db_manager = DatabaseManager(database_url)
+                        with db_manager.get_session() as session:
+                            # Quick connection test
+                            session.query(Business).limit(1).all()
+                    except Exception as conn_error:
+                        logger.debug(f"Database not ready yet (attempt {attempt + 1}): {conn_error}")
+                        if attempt < max_retries - 1:
+                            continue
+                        else:
+                            logger.warning(f"Database connection failed after {max_retries} attempts: {conn_error}")
+                            return
+                    
+                    # Database is ready - check if business exists
+                    db_manager = DatabaseManager(database_url)
+                    with db_manager.get_session() as session:
+                        existing = session.query(Business).filter(
+                            Business.external_id == "new-life-new-image-med-spa"
+                        ).first()
+                        
+                        if existing:
+                            logger.info(f"✅ Default business 'New Life New Image Med Spa' already registered in database (ID: {existing.external_id})")
+                            return
+                    
+                    # Business doesn't exist - register it using the shared registration function
+                    try:
+                        from routes_simple import register_business_to_database, BusinessRegistrationRequest
+                    except ImportError:
+                        try:
+                            from .routes_simple import register_business_to_database, BusinessRegistrationRequest
+                        except ImportError:
+                            try:
+                                from backend.production.routes_simple import register_business_to_database, BusinessRegistrationRequest
+                            except ImportError as import_err:
+                                logger.error(f"Could not import registration function: {import_err}")
+                                return
+                    
+                    # Load customer data
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+                    
+                    if not customer_file.exists():
+                        logger.warning(f"Customer file not found at {customer_file}, skipping default registration")
                         return
                     
-                    # Try to register from customer file
-                    try:
-                        import json
-                        import re
-                        import uuid
-                        from pathlib import Path
-                        from datetime import datetime as dt
-                        
-                        # Find customer file
-                        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                        customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
-                        
-                        if customer_file.exists():
-                            logger.info(f"Found customer file, registering default business...")
-                            # Read and parse JSON
-                            content = customer_file.read_text()
-                            json_match = re.search(r'```json\s*\n(.*?)\n```', content, re.DOTALL)
-                            if json_match:
-                                data = json.loads(json_match.group(1))
-                            else:
-                                data = json.loads(content)
-                            
-                            # Register business directly in database
-                            business_id = "new-life-new-image-med-spa"
-                            business_id_str = str(uuid.uuid4())
-                            
-                            # Parse established date
-                            established_date = None
-                            if data.get("business_info") and "established" in data["business_info"]:
-                                try:
-                                    established_date = dt.fromisoformat(data["business_info"]["established"].replace("Z", "+00:00"))
-                                except:
-                                    pass
-                            
-                            # Create business
-                            business = Business(
-                                id=business_id_str,
-                                external_id=business_id,
-                                name=data["business_name"],
-                                business_type=data["business_type"],
-                                description=data.get("business_info", {}).get("description", ""),
-                                address=data["location"].get("address", ""),
-                                city=data["location"].get("city", ""),
-                                state=data["location"].get("state", ""),
-                                postal_code=data["location"].get("postal_code", ""),
-                                country=data["location"].get("country", "US"),
-                                timezone=data["location"].get("timezone", "UTC"),
-                                website=data["contact_info"].get("website", ""),
-                                phone=data["contact_info"].get("phone", ""),
-                                email=data["contact_info"].get("email", ""),
-                                established_date=established_date,
-                                capacity=data.get("business_info", {}).get("capacity"),
-                                mcp_endpoint=f"/api/v1/businesses/{business_id}/mcp",
-                                a2a_endpoint=f"/api/v1/businesses/{business_id}/a2a",
-                                webhook_endpoint=data.get("integration", {}).get("webhook_endpoint"),
-                                ap2_enabled=data.get("ap2_config", {}).get("enabled", False),
-                                ap2_verification_required=data.get("ap2_config", {}).get("verification_required", True),
-                                status="active"
-                            )
-                            
-                            session.add(business)
-                            session.flush()
-                            
-                            # Add services
-                            for svc_config in data.get("services_config", []):
-                                service = BusinessService(
-                                    business_id=business.id,
-                                    service_id=svc_config.get("id", ""),
-                                    name=svc_config.get("name", ""),
-                                    description=svc_config.get("description", ""),
-                                    category=svc_config.get("category", ""),
-                                    workflow_pattern=svc_config.get("workflow_pattern", "booking_confirmation_payment"),
-                                    workflow_steps=svc_config.get("workflow_steps", []),
-                                    parameters_schema=svc_config.get("parameters", {}),
-                                    availability_endpoint=svc_config.get("availability", {}).get("endpoint", ""),
-                                    real_time_availability=svc_config.get("availability", {}).get("real_time", True),
-                                    cache_timeout_seconds=svc_config.get("availability", {}).get("cache_timeout_seconds", 300),
-                                    advance_booking_days=svc_config.get("availability", {}).get("advance_booking_days", 365),
-                                    cancellation_policy=svc_config.get("cancellation_policy", {}),
-                                    payment_config=svc_config.get("payment_config", {}),
-                                    modification_fee=svc_config.get("policies", {}).get("modification_fee", 0.0),
-                                    no_show_penalty=svc_config.get("policies", {}).get("no_show_penalty", 0.0),
-                                    enabled=True
-                                )
-                                session.add(service)
-                            
-                            session.commit()
-                            logger.info(f"✅ Default business 'New Life New Image Med Spa' registered successfully in database")
-                        else:
-                            logger.info(f"Customer file not found at {customer_file}, skipping default registration")
-                    except Exception as e:
-                        logger.warning(f"Could not auto-register default business: {e}")
+                    logger.info(f"📋 Loading customer data from {customer_file}")
+                    with open(customer_file, 'r') as f:
+                        customer_data = json.load(f)
+                    
+                    # Create registration request
+                    registration_request = BusinessRegistrationRequest(
+                        business_name=customer_data["business_name"],
+                        business_type=customer_data["business_type"],
+                        contact_info=customer_data["contact_info"],
+                        location=customer_data["location"],
+                        services_config=customer_data["services_config"],
+                        business_info=customer_data.get("business_info"),
+                        integration=customer_data.get("integration"),
+                        ap2_config=customer_data.get("ap2_config")
+                    )
+                    
+                    # Call shared registration function (synchronous, idempotent)
+                    logger.info(f"🚀 Registering default business '{registration_request.business_name}'...")
+                    success, registered_id = register_business_to_database(registration_request, database_url)
+                    
+                    if success:
+                        logger.info(f"✅ Default business '{registration_request.business_name}' auto-registered successfully! (ID: {registered_id})")
+                    else:
+                        logger.error(f"❌ Failed to auto-register default business")
+                    
+                    # Success - exit retry loop
+                    return
+                    
+                except Exception as e:
+                    logger.warning(f"Default business registration attempt {attempt + 1} failed: {e}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"❌ Default business registration failed after {max_retries} attempts: {e}")
                         import traceback
-                        logger.debug(f"Registration error: {traceback.format_exc()}")
-            except Exception as e:
-                logger.warning(f"Default business registration check failed: {e}")
+                        logger.error(f"Final error details: {traceback.format_exc()}")
         
         # Start default business registration in background
         default_biz_thread = threading.Thread(target=register_default_business, daemon=True)
