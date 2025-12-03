@@ -374,8 +374,27 @@ async def get_system_status():
 
 @api_router.get("/businesses/debug/list", tags=["Business Management"])
 async def list_all_businesses_debug():
-    """Debug endpoint to list all businesses in database"""
+    """Debug endpoint to list all businesses in database and memory"""
     import os
+    import traceback
+    
+    businesses_list = []
+    database_configured = False
+    total_db_businesses = 0
+    active_db_businesses = 0
+    error_message = None
+    traceback_info = None
+    
+    # Check in-memory store
+    in_memory_count = len(BUSINESS_STORE)
+    in_memory_businesses = []
+    for biz_id, biz_data in BUSINESS_STORE.items():
+        in_memory_businesses.append({
+            "business_id": biz_id,
+            "name": biz_data.get("business_name", "Unknown"),
+            "source": "in-memory"
+        })
+    
     try:
         database_url = os.getenv("DATABASE_URL")
         # Try alternative names Railway might use
@@ -386,6 +405,8 @@ async def list_all_businesses_debug():
             return {
                 "database_configured": False,
                 "message": "DATABASE_URL not configured",
+                "in_memory_businesses": in_memory_count,
+                "in_memory_list": in_memory_businesses,
                 "businesses": []
             }
         
