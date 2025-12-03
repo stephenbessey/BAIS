@@ -258,12 +258,362 @@ try:
     if not database_url or database_url == "not_set":
         database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
     
+    # Register default business function - always defined (works with or without database)
+    import threading
+    
+    def register_default_business():
+        """Register default business if database is available and business doesn't exist"""
+        import time
+        import asyncio
+        import json
+        from pathlib import Path
+        
+        # First, check if DATABASE_URL is not configured - if so, load demo business immediately
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url or database_url == "not_set":
+            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+        
+        # If no DATABASE_URL, load demo business immediately (no need to wait for database)
+        if not database_url or database_url.strip() == "" or database_url == "not_set":
+            logger.info("No DATABASE_URL configured - loading demo business into in-memory store immediately")
+            try:
+                from shared_storage import register_business as store_business
+                import json
+                from pathlib import Path
+
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+
+                if customer_file.exists():
+                    logger.info(f"📋 Loading demo data from {customer_file} into in-memory store...")
+                    with open(customer_file, 'r') as f:
+                        customer_data = json.load(f)
+
+                    # Create simplified business data for in-memory store
+                    # Structure must match what universal_tools.py expects
+                    business_id = "new-life-new-image-med-spa"
+                    demo_business = {
+                        "business_id": business_id,
+                        "business_name": customer_data["business_name"],  # universal_tools expects "business_name", not "name"
+                        "business_type": customer_data["business_type"],
+                        "business_info": customer_data.get("business_info", {}),  # Include full business_info for description
+                        "location": customer_data["location"],
+                        "contact_info": customer_data["contact_info"],  # universal_tools expects "contact_info", not "contact"
+                        "services_config": [  # universal_tools expects "services_config", not "services"
+                            {
+                                "id": svc["id"],
+                                "name": svc["name"],
+                                "description": svc["description"],
+                                "category": svc["category"]
+                            }
+                            for svc in customer_data.get("services_config", [])
+                        ],
+                        "status": "active",
+                        "mcp_enabled": True,
+                        "a2a_enabled": True
+                    }
+
+                    store_business(business_id, demo_business)
+                    logger.info(f"✅ Demo business '{customer_data['business_name']}' loaded into in-memory store!")
+                    return  # Exit early - no need to retry if no database
+                else:
+                    logger.warning(f"Customer file not found at {customer_file} for in-memory loading")
+                    # Try hardcoded fallback
+                    try:
+                        from shared_storage import register_business as store_business
+                        logger.info("📦 Loading demo businesses into in-memory store for local development...")
+                        demo_business = {
+                            "business_id": "new-life-new-image-med-spa",
+                            "business_name": "New Life New Image Med Spa",  # universal_tools expects "business_name"
+                            "business_type": "medical_spa",
+                            "business_info": {
+                                "description": "Premier medical spa in Las Vegas offering advanced aesthetic treatments"
+                            },
+                            "location": {
+                                "city": "Las Vegas",
+                                "state": "NV",
+                                "address": "4200 S Rainbow Blvd, Suite 100",
+                                "postal_code": "89103"
+                            },
+                            "contact_info": {  # universal_tools expects "contact_info"
+                                "phone": "+1-702-555-0123",
+                                "email": "contact@newlifenewimage.com",
+                                "website": "https://www.newlifenewimage.com"
+                            },
+                            "services_config": [  # universal_tools expects "services_config"
+                                {
+                                    "id": "botox-treatment",
+                                    "name": "Botox Treatment",
+                                    "description": "FDA-approved botulinum toxin injections to reduce fine lines and wrinkles",
+                                    "category": "injectable"
+                                },
+                                {
+                                    "id": "dermal-fillers",
+                                    "name": "Dermal Fillers",
+                                    "description": "Hyaluronic acid-based fillers for volume restoration and facial contouring",
+                                    "category": "injectable"
+                                },
+                                {
+                                    "id": "hydrafacial",
+                                    "name": "HydraFacial MD",
+                                    "description": "Medical-grade facial treatment with no downtime",
+                                    "category": "facial_treatment"
+                                }
+                            ],
+                            "status": "active",
+                            "mcp_enabled": True,
+                            "a2a_enabled": True
+                        }
+                        store_business("new-life-new-image-med-spa", demo_business)
+                        logger.info("✅ Demo business loaded into in-memory store for local development")
+                        return
+                    except Exception as mem_err:
+                        logger.error(f"Failed to load demo data into memory: {mem_err}")
+            except Exception as mem_err:
+                logger.error(f"Failed to load demo data into in-memory store: {mem_err}")
+                import traceback
+                logger.error(f"Error details: {traceback.format_exc()}")
+            return  # Exit - no database to wait for
+        
+        # DATABASE_URL is configured - try to register business in database with retries
+        # Retry logic: try multiple times with increasing delays
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                # Wait for database to be ready (exponential backoff)
+                wait_time = 5 + (attempt * 5)  # 5s, 10s, 15s, 20s, 25s
+                if attempt > 0:
+                    logger.info(f"Retrying default business registration (attempt {attempt + 1}/{max_retries}) after {wait_time}s...")
+                time.sleep(wait_time)
+                
+                # Re-check DATABASE_URL (in case it changed)
+                database_url = os.getenv("DATABASE_URL")
+                if not database_url or database_url == "not_set":
+                    database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+                
+                if not database_url or database_url.strip() == "" or database_url == "not_set":
+                    # This shouldn't happen now, but if it does, load demo business
+                    if attempt == max_retries - 1:
+                        logger.info("No DATABASE_URL configured - loading demo business into in-memory store")
+                        # Load demo data into in-memory store for local development
+                        try:
+                            from shared_storage import register_business as store_business
+                            import json
+                            from pathlib import Path
+
+                            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                            customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+
+                            if customer_file.exists():
+                                logger.info(f"📋 Loading demo data from {customer_file} into in-memory store...")
+                                with open(customer_file, 'r') as f:
+                                    customer_data = json.load(f)
+
+                                # Create simplified business data for in-memory store
+                                business_id = "new-life-new-image-med-spa"
+                                demo_business = {
+                                    "business_id": business_id,
+                                    "business_name": customer_data["business_name"],  # universal_tools expects "business_name"
+                                    "business_type": customer_data["business_type"],
+                                    "business_info": customer_data.get("business_info", {}),  # Include full business_info
+                                    "location": customer_data["location"],
+                                    "contact_info": customer_data["contact_info"],  # universal_tools expects "contact_info"
+                                    "services_config": [  # universal_tools expects "services_config"
+                                        {
+                                            "id": svc["id"],
+                                            "name": svc["name"],
+                                            "description": svc["description"],
+                                            "category": svc["category"]
+                                        }
+                                        for svc in customer_data.get("services_config", [])
+                                    ],
+                                    "status": "active",
+                                    "mcp_enabled": True,
+                                    "a2a_enabled": True
+                                }
+
+                                store_business(business_id, demo_business)
+                                logger.info(f"✅ Demo business '{customer_data['business_name']}' loaded into in-memory store!")
+                            else:
+                                logger.warning(f"Customer file not found at {customer_file} for in-memory loading")
+                        except Exception as mem_err:
+                            logger.error(f"Failed to load demo data into in-memory store: {mem_err}")
+                            import traceback
+                            logger.error(f"Error details: {traceback.format_exc()}")
+                    continue
+                
+                # Try to import database models
+                DatabaseManager = None
+                Business = None
+                try:
+                    from core.database_models import DatabaseManager, Business
+                except ImportError:
+                    try:
+                        from .core.database_models import DatabaseManager, Business
+                    except ImportError:
+                        try:
+                            from backend.production.core.database_models import DatabaseManager, Business
+                        except ImportError:
+                            if attempt == max_retries - 1:
+                                logger.warning("Could not import database models for default business registration")
+                            continue
+                
+                if not DatabaseManager or not Business:
+                    continue
+                
+                # Test database connection
+                try:
+                    db_manager = DatabaseManager(database_url)
+                    with db_manager.get_session() as session:
+                        # Quick connection test
+                        session.query(Business).limit(1).all()
+                except Exception as conn_error:
+                    error_msg = str(conn_error)
+                    if "postgres.railway.internal" in error_msg or "could not translate host name" in error_msg:
+                        if attempt == max_retries - 1:
+                            logger.warning("⚠️  Cannot connect to Railway internal database from local environment")
+                            logger.warning("   Falling back to in-memory storage for demo business")
+                            logger.warning("   To use the database, see DATABASE_SETUP.md for configuration options")
+                    else:
+                        logger.debug(f"Database not ready yet (attempt {attempt + 1}): {conn_error}")
+
+                    if attempt < max_retries - 1:
+                        continue
+                    else:
+                        if "postgres.railway.internal" not in error_msg:
+                            logger.warning(f"Database connection failed after {max_retries} attempts: {conn_error}")
+                        return
+                
+                # Database is ready - check if business exists
+                db_manager = DatabaseManager(database_url)
+                with db_manager.get_session() as session:
+                    existing = session.query(Business).filter(
+                        Business.external_id == "new-life-new-image-med-spa"
+                    ).first()
+                    
+                    if existing:
+                        logger.info(f"✅ Default business 'New Life New Image Med Spa' already registered in database (ID: {existing.external_id})")
+                        return
+                
+                # Business doesn't exist - register it using the shared registration function
+                try:
+                    from routes_simple import register_business_to_database, BusinessRegistrationRequest
+                except ImportError:
+                    try:
+                        from .routes_simple import register_business_to_database, BusinessRegistrationRequest
+                    except ImportError:
+                        try:
+                            from backend.production.routes_simple import register_business_to_database, BusinessRegistrationRequest
+                        except ImportError as import_err:
+                            logger.error(f"Could not import registration function: {import_err}")
+                            return
+                
+                # Load customer data
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+                
+                if not customer_file.exists():
+                    logger.warning(f"Customer file not found at {customer_file}, trying in-memory fallback")
+                    # If no customer file, populate in-memory store with basic demo data
+                    try:
+                        from shared_storage import register_business as store_business
+                        logger.info("📦 Loading demo businesses into in-memory store for local development...")
+
+                        # Create basic demo business for in-memory store
+                        demo_business = {
+                            "business_id": "new-life-new-image-med-spa",
+                            "business_name": "New Life New Image Med Spa",  # universal_tools expects "business_name"
+                            "business_type": "medical_spa",
+                            "business_info": {
+                                "description": "Premier medical spa in Las Vegas offering advanced aesthetic treatments"
+                            },
+                            "location": {
+                                "city": "Las Vegas",
+                                "state": "NV",
+                                "address": "4200 S Rainbow Blvd, Suite 100",
+                                "postal_code": "89103"
+                            },
+                            "contact_info": {  # universal_tools expects "contact_info"
+                                "phone": "+1-702-555-0123",
+                                "email": "contact@newlifenewimage.com",
+                                "website": "https://www.newlifenewimage.com"
+                            },
+                            "services_config": [  # universal_tools expects "services_config"
+                                {
+                                    "id": "botox-treatment",
+                                    "name": "Botox Treatment",
+                                    "description": "FDA-approved botulinum toxin injections to reduce fine lines and wrinkles",
+                                    "category": "injectable"
+                                },
+                                {
+                                    "id": "dermal-fillers",
+                                    "name": "Dermal Fillers",
+                                    "description": "Hyaluronic acid-based fillers for volume restoration and facial contouring",
+                                    "category": "injectable"
+                                },
+                                {
+                                    "id": "hydrafacial",
+                                    "name": "HydraFacial MD",
+                                    "description": "Medical-grade facial treatment with no downtime",
+                                    "category": "facial_treatment"
+                                }
+                            ],
+                            "status": "active",
+                            "mcp_enabled": True,
+                            "a2a_enabled": True
+                        }
+
+                        store_business("new-life-new-image-med-spa", demo_business)
+                        logger.info("✅ Demo business loaded into in-memory store for local development")
+                        return
+                    except Exception as mem_err:
+                        logger.error(f"Failed to load demo data into memory: {mem_err}")
+                    return
+                
+                logger.info(f"📋 Loading customer data from {customer_file}")
+                with open(customer_file, 'r') as f:
+                    customer_data = json.load(f)
+                
+                # Create registration request
+                registration_request = BusinessRegistrationRequest(
+                    business_name=customer_data["business_name"],
+                    business_type=customer_data["business_type"],
+                    contact_info=customer_data["contact_info"],
+                    location=customer_data["location"],
+                    services_config=customer_data["services_config"],
+                    business_info=customer_data.get("business_info"),
+                    integration=customer_data.get("integration"),
+                    ap2_config=customer_data.get("ap2_config")
+                )
+                
+                # Call shared registration function (synchronous, idempotent)
+                logger.info(f"🚀 Registering default business '{registration_request.business_name}'...")
+                success, registered_id = register_business_to_database(registration_request, database_url)
+                
+                if success:
+                    logger.info(f"✅ Default business '{registration_request.business_name}' auto-registered successfully! (ID: {registered_id})")
+                else:
+                    logger.error(f"❌ Failed to auto-register default business")
+                
+                # Success - exit retry loop
+                return
+                
+            except Exception as e:
+                logger.warning(f"Default business registration attempt {attempt + 1} failed: {e}")
+                if attempt == max_retries - 1:
+                    logger.error(f"❌ Default business registration failed after {max_retries} attempts: {e}")
+                    import traceback
+                    logger.error(f"Final error details: {traceback.format_exc()}")
+    
+    # Start default business registration thread (always, regardless of DATABASE_URL)
+    default_biz_thread = threading.Thread(target=register_default_business, daemon=True)
+    default_biz_thread.start()
+    logger.info("Default business registration check started in background")
+    
     if database_url and database_url.strip() and database_url != "not_set":
         # Log that we found DATABASE_URL (mask password)
         masked_url = database_url.split('@')[1] if '@' in database_url else "***"
         logger.info(f"📊 DATABASE_URL found: postgresql://***@{masked_url}")
-        
-        import threading
         
         def init_database_background():
             """Initialize database in background thread with timeout"""
@@ -333,245 +683,6 @@ try:
         db_thread = threading.Thread(target=init_database_background, daemon=True)
         db_thread.start()
         logger.info("Database initialization started in background thread")
-        
-        # Register default business if not exists (in background after DB init)
-        def register_default_business():
-            """Register default business if database is available and business doesn't exist"""
-            import time
-            import asyncio
-            import json
-            from pathlib import Path
-            
-            # Retry logic: try multiple times with increasing delays
-            max_retries = 5
-            for attempt in range(max_retries):
-                try:
-                    # Wait for database to be ready (exponential backoff)
-                    wait_time = 5 + (attempt * 5)  # 5s, 10s, 15s, 20s, 25s
-                    if attempt > 0:
-                        logger.info(f"Retrying default business registration (attempt {attempt + 1}/{max_retries}) after {wait_time}s...")
-                    time.sleep(wait_time)
-                    
-                    database_url = os.getenv("DATABASE_URL")
-                    # Try alternative names Railway might use
-                    if not database_url or database_url == "not_set":
-                        database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
-                    
-                    if not database_url or database_url.strip() == "" or database_url == "not_set":
-                        if attempt == max_retries - 1:
-                            logger.info("No DATABASE_URL configured - loading demo business into in-memory store")
-                            # Load demo data into in-memory store for local development
-                            try:
-                                from shared_storage import register_business as store_business
-                                import json
-                                from pathlib import Path
-
-                                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                                customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
-
-                                if customer_file.exists():
-                                    logger.info(f"📋 Loading demo data from {customer_file} into in-memory store...")
-                                    with open(customer_file, 'r') as f:
-                                        customer_data = json.load(f)
-
-                                    # Create simplified business data for in-memory store
-                                    business_id = "new-life-new-image-med-spa"
-                                    demo_business = {
-                                        "business_id": business_id,
-                                        "name": customer_data["business_name"],
-                                        "business_type": customer_data["business_type"],
-                                        "description": customer_data.get("business_info", {}).get("description", ""),
-                                        "location": customer_data["location"],
-                                        "contact": customer_data["contact_info"],
-                                        "services": [
-                                            {
-                                                "id": svc["id"],
-                                                "name": svc["name"],
-                                                "description": svc["description"],
-                                                "category": svc["category"]
-                                            }
-                                            for svc in customer_data.get("services_config", [])
-                                        ],
-                                        "status": "active",
-                                        "mcp_enabled": True,
-                                        "a2a_enabled": True
-                                    }
-
-                                    store_business(business_id, demo_business)
-                                    logger.info(f"✅ Demo business '{customer_data['business_name']}' loaded into in-memory store!")
-                                else:
-                                    logger.warning(f"Customer file not found at {customer_file} for in-memory loading")
-                            except Exception as mem_err:
-                                logger.error(f"Failed to load demo data into in-memory store: {mem_err}")
-                                import traceback
-                                logger.error(f"Error details: {traceback.format_exc()}")
-                        continue
-                    
-                    # Try to import database models
-                    DatabaseManager = None
-                    Business = None
-                    try:
-                        from core.database_models import DatabaseManager, Business
-                    except ImportError:
-                        try:
-                            from .core.database_models import DatabaseManager, Business
-                        except ImportError:
-                            try:
-                                from backend.production.core.database_models import DatabaseManager, Business
-                            except ImportError:
-                                if attempt == max_retries - 1:
-                                    logger.warning("Could not import database models for default business registration")
-                                continue
-                    
-                    if not DatabaseManager or not Business:
-                        continue
-                    
-                    # Test database connection
-                    try:
-                        db_manager = DatabaseManager(database_url)
-                        with db_manager.get_session() as session:
-                            # Quick connection test
-                            session.query(Business).limit(1).all()
-                    except Exception as conn_error:
-                        error_msg = str(conn_error)
-                        if "postgres.railway.internal" in error_msg or "could not translate host name" in error_msg:
-                            if attempt == max_retries - 1:
-                                logger.warning("⚠️  Cannot connect to Railway internal database from local environment")
-                                logger.warning("   Falling back to in-memory storage for demo business")
-                                logger.warning("   To use the database, see DATABASE_SETUP.md for configuration options")
-                        else:
-                            logger.debug(f"Database not ready yet (attempt {attempt + 1}): {conn_error}")
-
-                        if attempt < max_retries - 1:
-                            continue
-                        else:
-                            if "postgres.railway.internal" not in error_msg:
-                                logger.warning(f"Database connection failed after {max_retries} attempts: {conn_error}")
-                            return
-                    
-                    # Database is ready - check if business exists
-                    db_manager = DatabaseManager(database_url)
-                    with db_manager.get_session() as session:
-                        existing = session.query(Business).filter(
-                            Business.external_id == "new-life-new-image-med-spa"
-                        ).first()
-                        
-                        if existing:
-                            logger.info(f"✅ Default business 'New Life New Image Med Spa' already registered in database (ID: {existing.external_id})")
-                            return
-                    
-                    # Business doesn't exist - register it using the shared registration function
-                    try:
-                        from routes_simple import register_business_to_database, BusinessRegistrationRequest
-                    except ImportError:
-                        try:
-                            from .routes_simple import register_business_to_database, BusinessRegistrationRequest
-                        except ImportError:
-                            try:
-                                from backend.production.routes_simple import register_business_to_database, BusinessRegistrationRequest
-                            except ImportError as import_err:
-                                logger.error(f"Could not import registration function: {import_err}")
-                                return
-                    
-                    # Load customer data
-                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-                    customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
-                    
-                    if not customer_file.exists():
-                        logger.warning(f"Customer file not found at {customer_file}, trying in-memory fallback")
-                        # If no customer file, populate in-memory store with basic demo data
-                        try:
-                            from shared_storage import register_business as store_business
-                            logger.info("📦 Loading demo businesses into in-memory store for local development...")
-
-                            # Create basic demo business for in-memory store
-                            demo_business = {
-                                "business_id": "new-life-new-image-med-spa",
-                                "name": "New Life New Image Med Spa",
-                                "business_type": "medical_spa",
-                                "description": "Premier medical spa in Las Vegas offering advanced aesthetic treatments",
-                                "location": {
-                                    "city": "Las Vegas",
-                                    "state": "NV",
-                                    "address": "4200 S Rainbow Blvd, Suite 100",
-                                    "postal_code": "89103"
-                                },
-                                "contact": {
-                                    "phone": "+1-702-555-0123",
-                                    "email": "contact@newlifenewimage.com",
-                                    "website": "https://www.newlifenewimage.com"
-                                },
-                                "services": [
-                                    {
-                                        "id": "botox-treatment",
-                                        "name": "Botox Treatment",
-                                        "description": "FDA-approved botulinum toxin injections to reduce fine lines and wrinkles",
-                                        "category": "injectable"
-                                    },
-                                    {
-                                        "id": "dermal-fillers",
-                                        "name": "Dermal Fillers",
-                                        "description": "Hyaluronic acid-based fillers for volume restoration and facial contouring",
-                                        "category": "injectable"
-                                    },
-                                    {
-                                        "id": "hydrafacial",
-                                        "name": "HydraFacial MD",
-                                        "description": "Medical-grade facial treatment with no downtime",
-                                        "category": "facial_treatment"
-                                    }
-                                ],
-                                "status": "active",
-                                "mcp_enabled": True,
-                                "a2a_enabled": True
-                            }
-
-                            store_business("new-life-new-image-med-spa", demo_business)
-                            logger.info("✅ Demo business loaded into in-memory store for local development")
-                            return
-                        except Exception as mem_err:
-                            logger.error(f"Failed to load demo data into memory: {mem_err}")
-                        return
-                    
-                    logger.info(f"📋 Loading customer data from {customer_file}")
-                    with open(customer_file, 'r') as f:
-                        customer_data = json.load(f)
-                    
-                    # Create registration request
-                    registration_request = BusinessRegistrationRequest(
-                        business_name=customer_data["business_name"],
-                        business_type=customer_data["business_type"],
-                        contact_info=customer_data["contact_info"],
-                        location=customer_data["location"],
-                        services_config=customer_data["services_config"],
-                        business_info=customer_data.get("business_info"),
-                        integration=customer_data.get("integration"),
-                        ap2_config=customer_data.get("ap2_config")
-                    )
-                    
-                    # Call shared registration function (synchronous, idempotent)
-                    logger.info(f"🚀 Registering default business '{registration_request.business_name}'...")
-                    success, registered_id = register_business_to_database(registration_request, database_url)
-                    
-                    if success:
-                        logger.info(f"✅ Default business '{registration_request.business_name}' auto-registered successfully! (ID: {registered_id})")
-                    else:
-                        logger.error(f"❌ Failed to auto-register default business")
-                    
-                    # Success - exit retry loop
-                    return
-                    
-                except Exception as e:
-                    logger.warning(f"Default business registration attempt {attempt + 1} failed: {e}")
-                    if attempt == max_retries - 1:
-                        logger.error(f"❌ Default business registration failed after {max_retries} attempts: {e}")
-                        import traceback
-                        logger.error(f"Final error details: {traceback.format_exc()}")
-        
-        # Start default business registration in background
-        default_biz_thread = threading.Thread(target=register_default_business, daemon=True)
-        default_biz_thread.start()
-        logger.info("Default business registration check started in background")
     
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")

@@ -530,13 +530,15 @@ class BAISUniversalToolHandler:
                             if matches:
                                 logger.info(f"✅ Business '{business_data.get('business_name', 'Unknown')}' MATCHED all criteria - adding to results")
                                 # Get services
+                                # Include all services, not just first 5, so LLM has full context
                                 services = [
                                     {
                                         "id": svc.get("id", ""),
                                         "name": svc.get("name", ""),
-                                        "description": svc.get("description", "")
+                                        "description": svc.get("description", ""),
+                                        "category": svc.get("category", "")
                                     }
-                                    for svc in business_data.get("services_config", [])[:5]
+                                    for svc in business_data.get("services_config", [])  # Include all services
                                 ]
                                 
                                 business_result = {
@@ -754,80 +756,132 @@ class BAISUniversalToolHandler:
     ) -> Dict[str, Any]:
         """
         Get detailed service information for a specific business.
+        Checks database first, then in-memory store.
         """
         try:
-            # Mock data - in production, query your actual business database
-            business_services = {
-                "hotel_001": {
-                    "business_id": "hotel_001",
-                    "business_name": "Zion Adventure Lodge",
-                    "services": [
-                        {
-                            "service_id": "room_booking",
-                            "name": "Room Reservation",
-                            "description": "Book a room for your stay at Zion Adventure Lodge",
-                            "parameters": {
-                                "check_in_date": "date",
-                                "check_out_date": "date", 
-                                "room_type": "string",
-                                "guests": "integer"
-                            },
-                            "pricing": {
-                                "base_price": 299.00,
-                                "currency": "USD"
-                            },
-                            "availability": "available"
-                        },
-                        {
-                            "service_id": "restaurant_booking",
-                            "name": "Restaurant Reservation", 
-                            "description": "Reserve a table at our on-site restaurant",
-                            "parameters": {
-                                "date": "date",
-                                "time": "time",
-                                "party_size": "integer",
-                                "special_requests": "string"
-                            },
-                            "pricing": {
-                                "deposit_required": True,
-                                "deposit_amount": 25.00,
-                                "currency": "USD"
-                            },
-                            "availability": "available"
+            # Try database first if available
+            if self.db_manager:
+                try:
+                    from ..core.database_models import Business, BusinessService
+                    with self.db_manager.get_session() as session:
+                        # Find business by external_id or id
+                        business = session.query(Business).filter(
+                            (Business.external_id == business_id) | (Business.id == business_id)
+                        ).first()
+                        
+                        if business:
+                            services = session.query(BusinessService).filter(
+                                BusinessService.business_id == business.id
+                            ).all()
+                            
+                            service_list = []
+                            for svc in services:
+                                service_data = {
+                                    "service_id": svc.service_id or str(svc.id),
+                                    "name": svc.name,
+                                    "description": svc.description or "",
+                                    "category": svc.category or "",
+                                }
+                                # Add pricing if available
+                                if svc.pricing:
+                                    if isinstance(svc.pricing, dict):
+                                        service_data["pricing"] = svc.pricing
+                                    else:
+                                        service_data["pricing"] = {"base_price": svc.pricing}
+                                # Add parameters if available
+                                if svc.parameters:
+                                    if isinstance(svc.parameters, dict):
+                                        service_data["parameters"] = svc.parameters
+                                
+                                service_list.append(service_data)
+                            
+                            return {
+                                "business_id": business.external_id or str(business.id),
+                                "business_name": business.name,
+                                "services": service_list
+                            }
+                except Exception as db_error:
+                    logger.debug(f"Database query failed, trying in-memory store: {db_error}")
+            
+            # Fall back to in-memory store
+            try:
+                # Try multiple import paths for shared_storage
+                simple_store = None
+                try:
+                    from shared_storage import BUSINESS_STORE as simple_store
+                except ImportError:
+                    try:
+                        from ..shared_storage import BUSINESS_STORE as simple_store
+                    except ImportError:
+                        try:
+                            from backend.production.shared_storage import BUSINESS_STORE as simple_store
+                        except ImportError:
+                            import sys
+                            import os
+                            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                            if parent_dir not in sys.path:
+                                sys.path.insert(0, parent_dir)
+                            try:
+                                from backend.production import shared_storage
+                                simple_store = getattr(shared_storage, 'BUSINESS_STORE', None)
+                            except Exception as import_err:
+                                logger.debug(f"Could not import shared_storage: {import_err}")
+                                pass
+                
+                if simple_store and business_id in simple_store:
+                    business_data = simple_store[business_id]
+                    services_config = business_data.get("services_config", [])
+                    
+                    # Return full service details from services_config
+                    services = []
+                    for svc in services_config:
+                        service_info = {
+                            "service_id": svc.get("id", ""),
+                            "name": svc.get("name", ""),
+                            "description": svc.get("description", ""),
+                            "category": svc.get("category", "")
                         }
-                    ]
-                },
-                "restaurant_001": {
-                    "business_id": "restaurant_001", 
-                    "business_name": "Red Canyon Brewing",
-                    "services": [
-                        {
-                            "service_id": "table_reservation",
-                            "name": "Table Reservation",
-                            "description": "Reserve a table for dining",
-                            "parameters": {
-                                "date": "date",
-                                "time": "time",
-                                "party_size": "integer",
-                                "special_requests": "string"
-                            },
-                            "pricing": {
-                                "deposit_required": True,
-                                "deposit_amount": 15.00,
-                                "currency": "USD"
-                            },
-                            "availability": "available"
-                        }
-                    ]
-                }
-            }
+                        
+                        # Add pricing information if available
+                        if "pricing" in svc:
+                            service_info["pricing"] = svc["pricing"]
+                        elif "payment_config" in svc and "pricing" in svc["payment_config"]:
+                            service_info["pricing"] = svc["payment_config"]["pricing"]
+                        
+                        # Add parameters if available
+                        if "parameters" in svc:
+                            service_info["parameters"] = svc["parameters"]
+                        
+                        # Add workflow pattern if available
+                        if "workflow_pattern" in svc:
+                            service_info["workflow_pattern"] = svc["workflow_pattern"]
+                        
+                        # Add availability info if available
+                        if "availability" in svc:
+                            service_info["availability"] = svc["availability"]
+                        
+                        # Add cancellation policy if available
+                        if "cancellation_policy" in svc:
+                            service_info["cancellation_policy"] = svc["cancellation_policy"]
+                        
+                        services.append(service_info)
+                    
+                    return {
+                        "business_id": business_id,
+                        "business_name": business_data.get("business_name", ""),
+                        "services": services
+                    }
             
-            if business_id not in business_services:
-                raise ValueError(f"Business not found: {business_id}")
+            except Exception as store_error:
+                logger.warning(f"In-memory store query failed: {store_error}")
             
-            return business_services[business_id]
+            # Business not found in database or in-memory store
+            raise ValueError(f"Business not found: {business_id}")
             
+        except ValueError:
+            raise
         except Exception as e:
+            logger.error(f"Failed to get business services: {str(e)}", exc_info=True)
             return {
                 "error": f"Failed to get business services: {str(e)}",
                 "business_id": business_id
