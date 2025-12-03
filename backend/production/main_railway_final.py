@@ -87,17 +87,40 @@ app.add_middleware(
 @app.get("/health")
 def basic_health_check():
     """Basic health check that's always available - no dependencies"""
+    # This endpoint MUST always return 200 OK for Railway health checks
+    # Keep it as simple as possible - no dependencies on imports or app state
     try:
+        # Safely get ready status - app.state might not be initialized yet
+        ready_status = False
+        try:
+            ready_status = getattr(app.state, 'ready', False)
+        except (AttributeError, RuntimeError, Exception):
+            # App state not initialized yet, that's okay
+            pass
+        
+        # Try to get timestamp, but don't fail if datetime isn't available
+        try:
+            timestamp = datetime.utcnow().isoformat()
+        except:
+            timestamp = "unknown"
+        
         return {
             "status": "healthy",
             "service": "BAIS Production Server",
             "environment": "railway",
-            "ready": app.state.ready,
-            "timestamp": datetime.utcnow().isoformat()
+            "ready": ready_status,
+            "timestamp": timestamp
         }
     except Exception:
-        # Even if datetime fails, return something
-        return {"status": "healthy", "service": "BAIS Production Server", "ready": app.state.ready}
+        # Even if everything fails, return a minimal healthy response
+        # This ensures Railway health checks always pass
+        # Railway needs a 200 OK response, not an error
+        return {
+            "status": "healthy",
+            "service": "BAIS Production Server",
+            "ready": False,
+            "note": "Startup in progress"
+        }
 
 try:
     logger.info("Starting BAIS Railway final deployment initialization...")
@@ -227,18 +250,18 @@ try:
     
     logger.info("Successfully created BAIS application with available routes")
     
-        # Initialize database tables if DATABASE_URL is configured
-        # Do this after routes are loaded so routes work even if DB init fails
-        # Use background thread to avoid blocking startup
-        database_url = os.getenv("DATABASE_URL")
-        # Try alternative names Railway might use
-        if not database_url or database_url == "not_set":
-            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
-        
-        if database_url and database_url.strip() and database_url != "not_set":
-            # Log that we found DATABASE_URL (mask password)
-            masked_url = database_url.split('@')[1] if '@' in database_url else "***"
-            logger.info(f"📊 DATABASE_URL found for initialization: postgresql://***@{masked_url}")
+    # Initialize database tables if DATABASE_URL is configured
+    # Do this after routes are loaded so routes work even if DB init fails
+    # Use background thread to avoid blocking startup
+    database_url = os.getenv("DATABASE_URL")
+    # Try alternative names Railway might use
+    if not database_url or database_url == "not_set":
+        database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+    
+    if database_url and database_url.strip() and database_url != "not_set":
+        # Log that we found DATABASE_URL (mask password)
+        masked_url = database_url.split('@')[1] if '@' in database_url else "***"
+        logger.info(f"📊 DATABASE_URL found for initialization: postgresql://***@{masked_url}")
         import threading
         
         def init_database_background():
@@ -262,7 +285,9 @@ try:
                     try:
                         # Create database manager - it will handle connection pooling
                         # The connection will be established lazily on first use
-                        db_manager = DatabaseManager(database_url)
+                        # Capture database_url from outer scope
+                        db_url = database_url
+                        db_manager = DatabaseManager(db_url)
                         # Create tables - this should be fast if tables already exist
                         # If connection fails, it will raise an exception which we catch
                         db_manager.create_tables()
