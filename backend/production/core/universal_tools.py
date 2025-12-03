@@ -378,9 +378,11 @@ class BAISUniversalToolHandler:
                 logger.debug(f"Database query failed, using fallback: {db_error}")
                 # Continue to fallback logic
             
-            # Also check in-memory BUSINESS_STORE (from shared_storage.py)
-            # This allows businesses registered via simplified routes to be discoverable
-            try:
+            # Only check in-memory BUSINESS_STORE if database is not available
+            # Database is the source of truth - in-memory is only a fallback
+            if not db_checked or len(businesses) == 0:
+                # Only use in-memory store if we don't have database access
+                try:
                 # Try multiple import paths for shared_storage
                 simple_store = None
                 try:
@@ -406,9 +408,10 @@ class BAISUniversalToolHandler:
                                 logger.debug(f"Could not import shared_storage: {import_err}")
                                 pass
                 
-                if simple_store:
-                    logger.info(f"Checking in-memory BUSINESS_STORE with {len(simple_store)} businesses")
+                if simple_store and len(simple_store) > 0:
+                    logger.info(f"Checking in-memory BUSINESS_STORE (fallback only) with {len(simple_store)} businesses")
                     logger.info(f"Business IDs in store: {list(simple_store.keys())}")
+                    logger.warning("Using in-memory store as fallback - database should be primary source")
                     for business_id, business_data in simple_store.items():
                         logger.info(f"Checking business: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
                         # Skip if already in results

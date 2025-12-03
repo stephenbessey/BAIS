@@ -66,11 +66,13 @@ async def register_business(request: BusinessRegistrationRequest):
         # Generate business ID
         business_id = generate_business_id(request.business_name)
         
-        # Try to save to database first (if available)
+        # ALWAYS try to save to database first - database is the source of truth
+        # In-memory storage is only a fallback for local development
         database_url = os.getenv("DATABASE_URL")
         db_saved = False
         
         if database_url and database_url != "not_set":
+            logger.info(f"💾 Saving business to Railway database: {request.business_name}")
             try:
                 # Try multiple import paths for database models
                 DatabaseManager = None
@@ -182,16 +184,18 @@ async def register_business(request: BusinessRegistrationRequest):
                         
                         session.commit()
                         db_saved = True
-                        logger.info(f"Saved business to database: {request.business_name} (ID: {business_id}, DB ID: {business_id_str})")
+                        logger.info(f"✅ Business saved to Railway database: {request.business_name} (ID: {business_id}, DB ID: {business_id_str})")
+                        logger.info(f"   Business is now discoverable through all AI platforms via BAIS tools")
                 else:
-                    logger.warning("Database models not available, skipping database save")
+                    logger.error("❌ Database models not available - business will NOT persist! This should not happen on Railway.")
             except HTTPException:
                 raise
             except Exception as db_error:
-                logger.warning(f"Database save failed, using in-memory storage: {db_error}")
+                logger.error(f"❌ Database save failed - business will NOT persist! Error: {db_error}")
                 import traceback
-                logger.debug(f"Database error details: {traceback.format_exc()}")
-                # Continue to in-memory storage as fallback
+                logger.error(f"Database error details: {traceback.format_exc()}")
+                # Still try in-memory storage as fallback, but this is not ideal
+                logger.warning("⚠️ Falling back to in-memory storage (data will be lost on restart)")
         
         # Also store in memory (for immediate access and fallback)
         # Check if business already exists in memory
@@ -215,10 +219,20 @@ async def register_business(request: BusinessRegistrationRequest):
             "registered_at": datetime.utcnow().isoformat()
         }
         
+        # Store in memory only as a fallback (for local development without database)
+        # Database is the primary source of truth
         store_business(business_id, business_data)
         
-        logger.info(f"Registered business: {request.business_name} (ID: {business_id})")
-        logger.info(f"Database saved: {db_saved}, Total in memory: {len(BUSINESS_STORE)}")
+        if db_saved:
+            logger.info(f"✅ Business registered and persisted: {request.business_name} (ID: {business_id})")
+            logger.info(f"   ✅ Saved to Railway database - will persist across deployments")
+            logger.info(f"   ✅ Discoverable through all AI platforms immediately")
+        else:
+            logger.warning(f"⚠️ Business registered in memory only: {request.business_name} (ID: {business_id})")
+            logger.warning(f"   ⚠️ NOT saved to database - will be lost on restart")
+            logger.warning(f"   ⚠️ This should only happen in local development without DATABASE_URL")
+        
+        logger.info(f"   In-memory store: {len(BUSINESS_STORE)} businesses (fallback only)")
         
         return JSONResponse(
             status_code=200,

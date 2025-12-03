@@ -43,33 +43,37 @@ class ChatResponse(BaseModel):
 
 
 def get_bais_tool_handler() -> BAISUniversalToolHandler:
-    """Get BAIS tool handler with database connection"""
+    """Get BAIS tool handler with database connection - ALWAYS prioritize database"""
     try:
         database_url = os.getenv("DATABASE_URL")
         if database_url and database_url != "not_set":
             try:
                 db_manager = DatabaseManager(database_url)
-                logger.info(f"Created BAIS tool handler with database connection")
+                logger.info(f"✅ Created BAIS tool handler with Railway database connection")
                 # Test connection by checking business count
                 try:
                     with db_manager.get_session() as session:
                         from ...core.database_models import Business
                         count = session.query(Business).count()
-                        logger.info(f"Database connection verified: {count} businesses in database")
+                        active_count = session.query(Business).filter(Business.status == "active").count()
+                        logger.info(f"✅ Database connection verified: {count} total businesses, {active_count} active")
                 except Exception as test_error:
-                    logger.warning(f"Database connection test failed: {test_error}")
+                    logger.warning(f"⚠️ Database connection test failed: {test_error}")
                 return BAISUniversalToolHandler(db_manager=db_manager)
             except Exception as e:
-                logger.warning(f"Could not create database manager, using handler without DB: {e}")
+                logger.error(f"❌ Could not create database manager: {e}")
                 import traceback
-                logger.debug(f"Database manager creation error: {traceback.format_exc()}")
+                logger.error(f"Database manager creation error: {traceback.format_exc()}")
+                # Still return handler, but it won't have database access
+                return BAISUniversalToolHandler()
         else:
-            logger.warning("No DATABASE_URL configured, tool handler will use in-memory storage only")
+            logger.error("❌ No DATABASE_URL configured - businesses will NOT persist! Set DATABASE_URL for Railway deployment.")
+            logger.error("   This should only happen in local development without a database.")
         return BAISUniversalToolHandler()
     except Exception as e:
-        logger.warning(f"Error creating tool handler: {e}")
+        logger.error(f"❌ Error creating tool handler: {e}")
         import traceback
-        logger.debug(f"Tool handler creation error: {traceback.format_exc()}")
+        logger.error(f"Tool handler creation error: {traceback.format_exc()}")
         return BAISUniversalToolHandler()
 
 
