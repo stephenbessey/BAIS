@@ -69,9 +69,13 @@ async def register_business(request: BusinessRegistrationRequest):
         # ALWAYS try to save to database first - database is the source of truth
         # In-memory storage is only a fallback for local development
         database_url = os.getenv("DATABASE_URL")
+        # Try alternative names Railway might use
+        if not database_url or database_url == "not_set":
+            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+        
         db_saved = False
         
-        if database_url and database_url != "not_set":
+        if database_url and database_url.strip() and database_url != "not_set":
             logger.info(f"💾 Saving business to Railway database: {request.business_name}")
             try:
                 # Try multiple import paths for database models
@@ -374,7 +378,11 @@ async def list_all_businesses_debug():
     import os
     try:
         database_url = os.getenv("DATABASE_URL")
+        # Try alternative names Railway might use
         if not database_url or database_url == "not_set":
+            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+        
+        if not database_url or database_url.strip() == "" or database_url == "not_set":
             return {
                 "database_configured": False,
                 "message": "DATABASE_URL not configured",

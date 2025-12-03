@@ -227,11 +227,18 @@ try:
     
     logger.info("Successfully created BAIS application with available routes")
     
-    # Initialize database tables if DATABASE_URL is configured
-    # Do this after routes are loaded so routes work even if DB init fails
-    # Use background thread to avoid blocking startup
-    database_url = os.getenv("DATABASE_URL")
-    if database_url and database_url != "not_set":
+        # Initialize database tables if DATABASE_URL is configured
+        # Do this after routes are loaded so routes work even if DB init fails
+        # Use background thread to avoid blocking startup
+        database_url = os.getenv("DATABASE_URL")
+        # Try alternative names Railway might use
+        if not database_url or database_url == "not_set":
+            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+        
+        if database_url and database_url.strip() and database_url != "not_set":
+            # Log that we found DATABASE_URL (mask password)
+            masked_url = database_url.split('@')[1] if '@' in database_url else "***"
+            logger.info(f"📊 DATABASE_URL found for initialization: postgresql://***@{masked_url}")
         import threading
         
         def init_database_background():
@@ -284,7 +291,11 @@ try:
             time.sleep(10)  # Give database more time to initialize
             try:
                 database_url = os.getenv("DATABASE_URL")
+                # Try alternative names Railway might use
                 if not database_url or database_url == "not_set":
+                    database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+                
+                if not database_url or database_url.strip() == "" or database_url == "not_set":
                     logger.info("No DATABASE_URL configured, skipping default business registration")
                     return
                 
@@ -525,6 +536,22 @@ def get_diagnostics():
 @app.get("/health/detailed")
 def detailed_health():
     """Detailed health check for diagnostics"""
+    # Check DATABASE_URL with fallbacks
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url or database_url == "not_set":
+        database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+    
+    # Mask password in URL for logging
+    masked_url = None
+    if database_url:
+        try:
+            if '@' in database_url:
+                masked_url = f"postgresql://***@{database_url.split('@')[1]}"
+            else:
+                masked_url = "postgresql://***"
+        except:
+            masked_url = "***"
+    
     health_status = {
         "status": "healthy" if import_errors == [] else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
@@ -532,7 +559,10 @@ def detailed_health():
         "import_errors": import_errors,
         "environment": {
             "PORT": os.getenv("PORT", "not_set"),
-            "DATABASE_URL": "configured" if os.getenv("DATABASE_URL") else "missing",
+            "DATABASE_URL": masked_url if masked_url else ("configured" if database_url else "missing"),
+            "DATABASE_URL_RAW": "set" if database_url else "not_set",
+            "POSTGRES_URL": "set" if os.getenv("POSTGRES_URL") else "not_set",
+            "PGDATABASE_URL": "set" if os.getenv("PGDATABASE_URL") else "not_set",
             "REDIS_URL": "configured" if os.getenv("REDIS_URL") else "missing"
         },
         "customer_readiness": {

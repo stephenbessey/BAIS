@@ -46,7 +46,18 @@ def get_bais_tool_handler() -> BAISUniversalToolHandler:
     """Get BAIS tool handler with database connection - ALWAYS prioritize database"""
     try:
         database_url = os.getenv("DATABASE_URL")
-        if database_url and database_url != "not_set":
+        # Log what we got (but mask password for security)
+        if database_url:
+            masked_url = database_url.split('@')[1] if '@' in database_url else "***"
+            logger.info(f"📊 DATABASE_URL found: postgresql://***@{masked_url}")
+        else:
+            logger.warning("⚠️ DATABASE_URL environment variable not found")
+            # Try alternative names Railway might use
+            database_url = os.getenv("POSTGRES_URL") or os.getenv("PGDATABASE_URL")
+            if database_url:
+                logger.info(f"📊 Found alternative DATABASE_URL: postgresql://***@{database_url.split('@')[1] if '@' in database_url else '***'}")
+        
+        if database_url and database_url.strip() and database_url != "not_set":
             try:
                 db_manager = DatabaseManager(database_url)
                 logger.info(f"✅ Created BAIS tool handler with Railway database connection")
@@ -59,6 +70,8 @@ def get_bais_tool_handler() -> BAISUniversalToolHandler:
                         logger.info(f"✅ Database connection verified: {count} total businesses, {active_count} active")
                 except Exception as test_error:
                     logger.warning(f"⚠️ Database connection test failed: {test_error}")
+                    import traceback
+                    logger.debug(f"Connection test error details: {traceback.format_exc()}")
                 return BAISUniversalToolHandler(db_manager=db_manager)
             except Exception as e:
                 logger.error(f"❌ Could not create database manager: {e}")
@@ -69,6 +82,7 @@ def get_bais_tool_handler() -> BAISUniversalToolHandler:
         else:
             logger.error("❌ No DATABASE_URL configured - businesses will NOT persist! Set DATABASE_URL for Railway deployment.")
             logger.error("   This should only happen in local development without a database.")
+            logger.error(f"   DATABASE_URL value: {repr(database_url)}")
         return BAISUniversalToolHandler()
     except Exception as e:
         logger.error(f"❌ Error creating tool handler: {e}")
