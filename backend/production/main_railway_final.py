@@ -348,7 +348,52 @@ try:
                     
                     if not database_url or database_url.strip() == "" or database_url == "not_set":
                         if attempt == max_retries - 1:
-                            logger.info("No DATABASE_URL configured after all retries, skipping default business registration")
+                            logger.info("No DATABASE_URL configured - loading demo business into in-memory store")
+                            # Load demo data into in-memory store for local development
+                            try:
+                                from shared_storage import register_business as store_business
+                                import json
+                                from pathlib import Path
+
+                                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                                customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
+
+                                if customer_file.exists():
+                                    logger.info(f"📋 Loading demo data from {customer_file} into in-memory store...")
+                                    with open(customer_file, 'r') as f:
+                                        customer_data = json.load(f)
+
+                                    # Create simplified business data for in-memory store
+                                    business_id = "new-life-new-image-med-spa"
+                                    demo_business = {
+                                        "business_id": business_id,
+                                        "name": customer_data["business_name"],
+                                        "business_type": customer_data["business_type"],
+                                        "description": customer_data.get("business_info", {}).get("description", ""),
+                                        "location": customer_data["location"],
+                                        "contact": customer_data["contact_info"],
+                                        "services": [
+                                            {
+                                                "id": svc["id"],
+                                                "name": svc["name"],
+                                                "description": svc["description"],
+                                                "category": svc["category"]
+                                            }
+                                            for svc in customer_data.get("services_config", [])
+                                        ],
+                                        "status": "active",
+                                        "mcp_enabled": True,
+                                        "a2a_enabled": True
+                                    }
+
+                                    store_business(business_id, demo_business)
+                                    logger.info(f"✅ Demo business '{customer_data['business_name']}' loaded into in-memory store!")
+                                else:
+                                    logger.warning(f"Customer file not found at {customer_file} for in-memory loading")
+                            except Exception as mem_err:
+                                logger.error(f"Failed to load demo data into in-memory store: {mem_err}")
+                                import traceback
+                                logger.error(f"Error details: {traceback.format_exc()}")
                         continue
                     
                     # Try to import database models
@@ -413,7 +458,59 @@ try:
                     customer_file = Path(project_root) / "customers" / "NewLifeNewImage_CORRECTED_BAIS_Submission.json"
                     
                     if not customer_file.exists():
-                        logger.warning(f"Customer file not found at {customer_file}, skipping default registration")
+                        logger.warning(f"Customer file not found at {customer_file}, trying in-memory fallback")
+                        # If no customer file, populate in-memory store with basic demo data
+                        try:
+                            from shared_storage import register_business as store_business
+                            logger.info("📦 Loading demo businesses into in-memory store for local development...")
+
+                            # Create basic demo business for in-memory store
+                            demo_business = {
+                                "business_id": "new-life-new-image-med-spa",
+                                "name": "New Life New Image Med Spa",
+                                "business_type": "medical_spa",
+                                "description": "Premier medical spa in Las Vegas offering advanced aesthetic treatments",
+                                "location": {
+                                    "city": "Las Vegas",
+                                    "state": "NV",
+                                    "address": "4200 S Rainbow Blvd, Suite 100",
+                                    "postal_code": "89103"
+                                },
+                                "contact": {
+                                    "phone": "+1-702-555-0123",
+                                    "email": "contact@newlifenewimage.com",
+                                    "website": "https://www.newlifenewimage.com"
+                                },
+                                "services": [
+                                    {
+                                        "id": "botox-treatment",
+                                        "name": "Botox Treatment",
+                                        "description": "FDA-approved botulinum toxin injections to reduce fine lines and wrinkles",
+                                        "category": "injectable"
+                                    },
+                                    {
+                                        "id": "dermal-fillers",
+                                        "name": "Dermal Fillers",
+                                        "description": "Hyaluronic acid-based fillers for volume restoration and facial contouring",
+                                        "category": "injectable"
+                                    },
+                                    {
+                                        "id": "hydrafacial",
+                                        "name": "HydraFacial MD",
+                                        "description": "Medical-grade facial treatment with no downtime",
+                                        "category": "facial_treatment"
+                                    }
+                                ],
+                                "status": "active",
+                                "mcp_enabled": True,
+                                "a2a_enabled": True
+                            }
+
+                            store_business("new-life-new-image-med-spa", demo_business)
+                            logger.info("✅ Demo business loaded into in-memory store for local development")
+                            return
+                        except Exception as mem_err:
+                            logger.error(f"Failed to load demo data into memory: {mem_err}")
                         return
                     
                     logger.info(f"📋 Loading customer data from {customer_file}")
