@@ -370,12 +370,24 @@ class DatabaseManager:
     """Database connection and session management"""
     
     def __init__(self, database_url: str):
+        # Add connect_args with timeout to prevent hanging connections
+        connect_args = {}
+        if database_url.startswith('postgresql'):
+            # PostgreSQL connection timeout (in seconds)
+            connect_args['connect_timeout'] = 10
+        elif database_url.startswith('sqlite'):
+            # SQLite doesn't need timeout, but set busy_timeout
+            connect_args['timeout'] = 10
+        
         self.engine = create_engine(
             database_url,
             pool_size=10,
             max_overflow=20,
             pool_pre_ping=True,
-            pool_recycle=3600
+            pool_recycle=3600,
+            connect_args=connect_args,
+            # Set pool timeout to prevent hanging
+            pool_timeout=10
         )
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self._setup_event_listeners()

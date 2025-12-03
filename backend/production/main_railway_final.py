@@ -70,6 +70,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Track app readiness
+app.state.ready = False
+
 # Add CORS middleware immediately
 app.add_middleware(
     CORSMiddleware,
@@ -89,11 +92,12 @@ def basic_health_check():
             "status": "healthy",
             "service": "BAIS Production Server",
             "environment": "railway",
+            "ready": app.state.ready,
             "timestamp": datetime.utcnow().isoformat()
         }
     except Exception:
         # Even if datetime fails, return something
-        return {"status": "healthy", "service": "BAIS Production Server"}
+        return {"status": "healthy", "service": "BAIS Production Server", "ready": app.state.ready}
 
 try:
     logger.info("Starting BAIS Railway final deployment initialization...")
@@ -195,36 +199,52 @@ try:
     
     # Initialize database tables if DATABASE_URL is configured
     # Do this after routes are loaded so routes work even if DB init fails
+    # Use background thread to avoid blocking startup
     database_url = os.getenv("DATABASE_URL")
     if database_url and database_url != "not_set":
-        try:
-            # Try multiple import paths
-            DatabaseManager = None
+        import threading
+        
+        def init_database_background():
+            """Initialize database in background thread with timeout"""
             try:
-                from core.database_models import DatabaseManager
-            except (ImportError, NameError):
+                # Try multiple import paths
+                DatabaseManager = None
                 try:
-                    from .core.database_models import DatabaseManager
+                    from core.database_models import DatabaseManager
                 except (ImportError, NameError):
                     try:
-                        from backend.production.core.database_models import DatabaseManager
-                    except (ImportError, NameError) as e:
-                        logger.warning(f"Could not import DatabaseManager: {e}")
-            
-            if DatabaseManager:
-                try:
-                    db_manager = DatabaseManager(database_url)
-                    db_manager.create_tables()
-                    logger.info("Database tables initialized successfully")
-                except Exception as db_init_error:
-                    logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
-                    # Don't fail the entire app if database init fails
-            else:
-                logger.warning("DatabaseManager not available, skipping table initialization")
-        except Exception as db_error:
-            logger.warning(f"Database initialization failed: {db_error}")
-            logger.warning("Continuing with in-memory storage only - routes will still work")
-            # Don't re-raise - allow app to continue
+                        from .core.database_models import DatabaseManager
+                    except (ImportError, NameError):
+                        try:
+                            from backend.production.core.database_models import DatabaseManager
+                        except (ImportError, NameError) as e:
+                            logger.warning(f"Could not import DatabaseManager: {e}")
+                            return
+                
+                if DatabaseManager:
+                    try:
+                        # Create database manager - it will handle connection pooling
+                        # The connection will be established lazily on first use
+                        db_manager = DatabaseManager(database_url)
+                        # Create tables - this should be fast if tables already exist
+                        # If connection fails, it will raise an exception which we catch
+                        db_manager.create_tables()
+                        logger.info("Database tables initialized successfully")
+                    except Exception as db_init_error:
+                        logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
+                        import traceback
+                        logger.debug(f"Database error details: {traceback.format_exc()}")
+                        # Don't fail the entire app if database init fails
+                else:
+                    logger.warning("DatabaseManager not available, skipping table initialization")
+            except Exception as db_error:
+                logger.warning(f"Database initialization failed: {db_error}")
+                logger.warning("Continuing with in-memory storage only - routes will still work")
+        
+        # Start database initialization in background thread
+        db_thread = threading.Thread(target=init_database_background, daemon=True)
+        db_thread.start()
+        logger.info("Database initialization started in background thread")
     
 except Exception as e:
     import_errors.append(f"Unexpected error: {str(e)}")
@@ -395,3 +415,7 @@ if import_errors:
     logger.warning(f"Import errors detected: {import_errors}")
 else:
     logger.info("BAIS Railway final application ready with complete feature set")
+
+# Mark app as ready after initialization
+app.state.ready = True
+logger.info("Application marked as ready - health checks will now return ready=true")
