@@ -353,3 +353,47 @@ async def get_system_status():
         },
         "ready_for_customers": True
     }
+
+@api_router.get("/businesses/debug/list", tags=["Business Management"])
+async def list_all_businesses_debug():
+    """Debug endpoint to list all businesses in database"""
+    import os
+    try:
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url or database_url == "not_set":
+            return {
+                "database_configured": False,
+                "message": "DATABASE_URL not configured",
+                "businesses": []
+            }
+        
+        from ..core.database_models import DatabaseManager, Business
+        db_manager = DatabaseManager(database_url)
+        with db_manager.get_session() as session:
+            all_businesses = session.query(Business).all()
+            businesses_list = []
+            for biz in all_businesses:
+                businesses_list.append({
+                    "id": str(biz.id),
+                    "external_id": biz.external_id,
+                    "name": biz.name,
+                    "business_type": biz.business_type,
+                    "city": biz.city,
+                    "state": biz.state,
+                    "status": biz.status
+                })
+            
+            return {
+                "database_configured": True,
+                "total_businesses": len(businesses_list),
+                "active_businesses": len([b for b in businesses_list if b["status"] == "active"]),
+                "businesses": businesses_list
+            }
+    except Exception as e:
+        import traceback
+        return {
+            "database_configured": True,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "businesses": []
+        }

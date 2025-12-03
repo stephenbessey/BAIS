@@ -230,12 +230,27 @@ class BAISUniversalToolHandler:
                 from ..core.database_models import DatabaseManager, Business, BusinessService
                 import os
                 
-                # Get database URL from environment
-                database_url = os.getenv("DATABASE_URL")
-                if database_url and database_url != "not_set":
+                # Use db_manager from handler if available, otherwise create new one
+                if self.db_manager:
+                    db_manager = self.db_manager
+                    logger.info(f"Using handler's database manager for search")
+                else:
+                    # Get database URL from environment
+                    database_url = os.getenv("DATABASE_URL")
+                    if not database_url or database_url == "not_set":
+                        logger.debug("No DATABASE_URL and no db_manager in handler, skipping database query")
+                        db_manager = None
+                    else:
+                        logger.info(f"Creating new database manager for search")
+                        db_manager = DatabaseManager(database_url)
+                
+                if db_manager:
                     logger.info(f"Searching database for query='{query}', location='{location}', category='{category}'")
-                    db_manager = DatabaseManager(database_url)
                     with db_manager.get_session() as session:
+                        # First, check total count of active businesses
+                        total_active = session.query(Business).filter(Business.status == "active").count()
+                        logger.info(f"Total active businesses in database: {total_active}")
+                        
                         query_obj = session.query(Business).filter(Business.status == "active")
                         db_checked = True
                         
@@ -315,6 +330,14 @@ class BAISUniversalToolHandler:
                         
                         # Get matching businesses
                         db_businesses = query_obj.limit(10).all()
+                        logger.info(f"Database query returned {len(db_businesses)} matching businesses")
+                        
+                        if len(db_businesses) == 0 and total_active > 0:
+                            # If we have businesses but no matches, log all business names for debugging
+                            all_businesses = session.query(Business).filter(Business.status == "active").all()
+                            logger.warning(f"No matches found, but {len(all_businesses)} active businesses exist:")
+                            for biz in all_businesses[:5]:  # Log first 5
+                                logger.warning(f"  - {biz.name} (type: {biz.business_type}, city: {biz.city}, state: {biz.state})")
                         
                         for biz in db_businesses:
                             # Get services for this business
@@ -349,7 +372,7 @@ class BAISUniversalToolHandler:
                         
                         logger.info(f"Found {len(businesses)} businesses from database")
                 else:
-                    logger.debug("DATABASE_URL not configured, skipping database query")
+                    logger.debug("No database manager available, skipping database query")
                     
             except Exception as db_error:
                 logger.debug(f"Database query failed, using fallback: {db_error}")
@@ -639,12 +662,18 @@ class BAISUniversalToolHandler:
             if len(businesses) == 0:
                 logger.warning("No businesses found with any search criteria, trying to return all active businesses")
                 try:
-                    from ..core.database_models import DatabaseManager, Business, BusinessService
-                    import os
-                    database_url = os.getenv("DATABASE_URL")
-                    if database_url and database_url != "not_set":
-                        db_manager = DatabaseManager(database_url)
-                        with db_manager.get_session() as session:
+                    # Use handler's db_manager if available, otherwise create new one
+                    fallback_db_manager = self.db_manager
+                    if not fallback_db_manager:
+                        from ..core.database_models import DatabaseManager
+                        import os
+                        database_url = os.getenv("DATABASE_URL")
+                        if database_url and database_url != "not_set":
+                            fallback_db_manager = DatabaseManager(database_url)
+                    
+                    if fallback_db_manager:
+                        from ..core.database_models import Business, BusinessService
+                        with fallback_db_manager.get_session() as session:
                             all_businesses = session.query(Business).filter(
                                 Business.status == "active"
                             ).limit(10).all()
@@ -682,7 +711,7 @@ class BAISUniversalToolHandler:
                             
                             logger.info(f"Fallback: Returning {len(businesses)} total active businesses")
                     else:
-                        logger.debug("DATABASE_URL not set, cannot do fallback search")
+                        logger.debug("No database manager available, cannot do fallback search")
                 except Exception as e:
                     logger.error(f"Fallback search failed: {e}", exc_info=True)
             

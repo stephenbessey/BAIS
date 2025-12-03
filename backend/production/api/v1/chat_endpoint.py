@@ -49,12 +49,27 @@ def get_bais_tool_handler() -> BAISUniversalToolHandler:
         if database_url and database_url != "not_set":
             try:
                 db_manager = DatabaseManager(database_url)
+                logger.info(f"Created BAIS tool handler with database connection")
+                # Test connection by checking business count
+                try:
+                    with db_manager.get_session() as session:
+                        from ...core.database_models import Business
+                        count = session.query(Business).count()
+                        logger.info(f"Database connection verified: {count} businesses in database")
+                except Exception as test_error:
+                    logger.warning(f"Database connection test failed: {test_error}")
                 return BAISUniversalToolHandler(db_manager=db_manager)
             except Exception as e:
                 logger.warning(f"Could not create database manager, using handler without DB: {e}")
+                import traceback
+                logger.debug(f"Database manager creation error: {traceback.format_exc()}")
+        else:
+            logger.warning("No DATABASE_URL configured, tool handler will use in-memory storage only")
         return BAISUniversalToolHandler()
     except Exception as e:
         logger.warning(f"Error creating tool handler: {e}")
+        import traceback
+        logger.debug(f"Tool handler creation error: {traceback.format_exc()}")
         return BAISUniversalToolHandler()
 
 
