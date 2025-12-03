@@ -308,7 +308,18 @@ try:
                             active_count = session.query(Business).filter(Business.status == "active").count()
                             logger.info(f"✅ Database connection verified: {business_count} businesses in database ({active_count} active)")
                     except Exception as db_init_error:
-                        logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
+                        error_msg = str(db_init_error)
+                        if "postgres.railway.internal" in error_msg or "could not translate host name" in error_msg:
+                            logger.warning("⚠️  Database connection failed: Using Railway INTERNAL database URL")
+                            logger.warning("   The internal URL (postgres.railway.internal) only works when deployed on Railway.")
+                            logger.warning("   For local development, use one of these options:")
+                            logger.warning("   1. Get PUBLIC database URL from Railway dashboard (Connect tab)")
+                            logger.warning("   2. Use local PostgreSQL: export DATABASE_URL='postgresql://localhost/bais_dev'")
+                            logger.warning("   3. Use SQLite: export DATABASE_URL='sqlite:///./bais_local.db'")
+                            logger.warning("   4. Use in-memory storage: unset DATABASE_URL")
+                            logger.warning("   See DATABASE_SETUP.md for detailed instructions")
+                        else:
+                            logger.warning(f"Database initialization failed (non-blocking): {db_init_error}")
                         import traceback
                         logger.debug(f"Database error details: {traceback.format_exc()}")
                         # Don't fail the entire app if database init fails
@@ -422,11 +433,20 @@ try:
                             # Quick connection test
                             session.query(Business).limit(1).all()
                     except Exception as conn_error:
-                        logger.debug(f"Database not ready yet (attempt {attempt + 1}): {conn_error}")
+                        error_msg = str(conn_error)
+                        if "postgres.railway.internal" in error_msg or "could not translate host name" in error_msg:
+                            if attempt == max_retries - 1:
+                                logger.warning("⚠️  Cannot connect to Railway internal database from local environment")
+                                logger.warning("   Falling back to in-memory storage for demo business")
+                                logger.warning("   To use the database, see DATABASE_SETUP.md for configuration options")
+                        else:
+                            logger.debug(f"Database not ready yet (attempt {attempt + 1}): {conn_error}")
+
                         if attempt < max_retries - 1:
                             continue
                         else:
-                            logger.warning(f"Database connection failed after {max_retries} attempts: {conn_error}")
+                            if "postgres.railway.internal" not in error_msg:
+                                logger.warning(f"Database connection failed after {max_retries} attempts: {conn_error}")
                             return
                     
                     # Database is ready - check if business exists

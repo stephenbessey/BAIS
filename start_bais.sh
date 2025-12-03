@@ -59,12 +59,30 @@ echo "   Port: $PORT"
 echo ""
 
 # Check for environment variables
-if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OLLAMA_HOST" ]; then
-    echo -e "${YELLOW}⚠️  Note:${NC}"
-    echo "   - For Claude: Set ANTHROPIC_API_KEY environment variable"
-    echo "   - For Ollama: Configure host in the chat interface (e.g., Tailscale address)"
-    echo ""
+echo -e "${YELLOW}⚠️  Configuration Notes:${NC}"
+
+# Check DATABASE_URL
+if [ -z "$DATABASE_URL" ]; then
+    echo "   • Database: Using in-memory storage (data lost on restart)"
+    echo "     To persist data, set DATABASE_URL (see DATABASE_SETUP.md)"
+else
+    # Check if using internal Railway URL locally
+    if echo "$DATABASE_URL" | grep -q "postgres.railway.internal"; then
+        echo "   • Database: ⚠️  Using Railway INTERNAL URL - will not work locally!"
+        echo "     Get PUBLIC URL from Railway dashboard or use local database"
+        echo "     See DATABASE_SETUP.md for configuration options"
+    else
+        echo "   • Database: Using configured DATABASE_URL"
+    fi
 fi
+
+# Check LLM API keys
+if [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$OLLAMA_HOST" ]; then
+    echo "   • LLM: Not configured"
+    echo "     - For Claude: Set ANTHROPIC_API_KEY environment variable"
+    echo "     - For Ollama: Configure host in the chat interface"
+fi
+echo ""
 
 # Display URLs
 echo -e "${GREEN}🚀 Starting BAIS Server...${NC}"
