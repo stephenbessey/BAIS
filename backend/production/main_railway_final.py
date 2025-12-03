@@ -172,9 +172,39 @@ try:
         logger.info("Successfully imported and configured Universal LLM webhook routes")
         
     except ImportError as e:
-        logger.warning(f"Could not import universal webhook routes: {e}")
+        logger.error(f"Could not import universal webhook routes: {e}")
         import_errors.append(f"Universal webhooks import error: {str(e)}")
-        logger.warning(f"Import error details: {traceback.format_exc()}")
+        logger.error(f"Import error details: {traceback.format_exc()}")
+        # Add a fallback health endpoint if import fails
+        @app.get("/api/v1/llm-webhooks/health")
+        def fallback_webhook_health():
+            return {
+                "status": "degraded",
+                "message": "Universal webhook routes not available",
+                "error": str(e)
+            }
+    
+    # Ensure health endpoint is always available (even if router import failed)
+    # This is a safety net - the router should already have this endpoint
+    if not any(r.path == "/api/v1/llm-webhooks/health" for r in app.routes if hasattr(r, 'path')):
+        @app.get("/api/v1/llm-webhooks/health")
+        def ensure_webhook_health():
+            return {
+                "status": "healthy",
+                "architecture": "universal",
+                "description": "Handles requests for ALL BAIS businesses",
+                "endpoints": {
+                    "claude": "/api/v1/llm-webhooks/claude/tool-use",
+                    "chatgpt": "/api/v1/llm-webhooks/chatgpt/function-call",
+                    "gemini": "/api/v1/llm-webhooks/gemini/function-call"
+                },
+                "tools": {
+                    "search": "bais_search_businesses",
+                    "services": "bais_get_business_services",
+                    "execute": "bais_execute_service"
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
     
     # Import and configure Chat Endpoint
     try:

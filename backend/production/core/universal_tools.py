@@ -383,180 +383,180 @@ class BAISUniversalToolHandler:
             if not db_checked or len(businesses) == 0:
                 # Only use in-memory store if we don't have database access
                 try:
-                # Try multiple import paths for shared_storage
-                simple_store = None
-                try:
-                    from shared_storage import BUSINESS_STORE as simple_store
-                except ImportError:
+                    # Try multiple import paths for shared_storage
+                    simple_store = None
                     try:
-                        from ..shared_storage import BUSINESS_STORE as simple_store
+                        from shared_storage import BUSINESS_STORE as simple_store
                     except ImportError:
                         try:
-                            from backend.production.shared_storage import BUSINESS_STORE as simple_store
+                            from ..shared_storage import BUSINESS_STORE as simple_store
                         except ImportError:
-                            # Try importing the module and accessing the attribute
-                            import sys
-                            import os
-                            # Add parent directory to path if needed
-                            parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-                            if parent_dir not in sys.path:
-                                sys.path.insert(0, parent_dir)
                             try:
-                                from backend.production import shared_storage
-                                simple_store = getattr(shared_storage, 'BUSINESS_STORE', None)
-                            except Exception as import_err:
-                                logger.debug(f"Could not import shared_storage: {import_err}")
-                                pass
-                
-                if simple_store and len(simple_store) > 0:
-                    logger.info(f"Checking in-memory BUSINESS_STORE (fallback only) with {len(simple_store)} businesses")
-                    logger.info(f"Business IDs in store: {list(simple_store.keys())}")
-                    logger.warning("Using in-memory store as fallback - database should be primary source")
-                    for business_id, business_data in simple_store.items():
-                        logger.info(f"Checking business: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
-                        # Skip if already in results
-                        if any(b.get("business_id") == business_id for b in businesses):
-                            continue
-                        
-                        # Apply search filters
-                        matches = True
-                        business_name = business_data.get("business_name", "").lower()
-                        business_desc = business_data.get("business_info", {}).get("description", "").lower()
-                        business_type = business_data.get("business_type", "").lower()
-                        business_city = business_data.get("location", {}).get("city", "").lower()
-                        business_state = business_data.get("location", {}).get("state", "").lower()
-                        
-                        # Normalize location strings (remove punctuation, extra spaces)
-                        def normalize_location(loc_str):
-                            if not loc_str:
-                                return ""
-                            return " ".join(loc_str.lower().replace(",", " ").split())
-                        
-                        # Check query match - more flexible matching
-                        if query:
-                            query_lower = query.lower().strip()
-                            query_words = query_lower.split()
-                            
-                            # Normalize query terms (handle "med spa" -> "medspa", "med-spa", etc.)
-                            normalized_query = query_lower.replace(" ", "").replace("-", "")
-                            normalized_name = business_name.replace(" ", "").replace("-", "")
-                            
-                            # Check name, description, and service names
-                            service_names = " ".join([
-                                svc.get("name", "").lower() 
-                                for svc in business_data.get("services_config", [])
-                            ])
-                            
-                            # Enhanced matching: check normalized strings, partial matches, and keyword matching
-                            query_matches = (
-                                query_lower in business_name or
-                                business_name in query_lower or
-                                normalized_query in normalized_name or
-                                normalized_name in normalized_query or
-                                any(word in business_name for word in query_words if len(word) > 2) or
-                                query_lower in business_desc or
-                                any(word in business_desc for word in query_words if len(word) > 2) or
-                                query_lower in service_names or
-                                any(word in service_names for word in query_words if len(word) > 2)
-                            )
-                            
-                            # Very lenient matching: if ANY query word appears in name/description/services, it's a match
-                            # This ensures "med spa" matches "New Life New Image Med Spa"
-                            matches_query = (
-                                query_lower in business_name or
-                                query_lower in business_desc or
-                                query_lower in service_names or
-                                any(word in business_name for word in query_words if len(word) > 2) or
-                                any(word in business_desc for word in query_words if len(word) > 2) or
-                                any(word in service_names for word in query_words if len(word) > 2) or
-                                # Very lenient: if normalized query appears anywhere
-                                normalized_query in normalized_name or
-                                normalized_name in normalized_query
-                            )
-                            
-                            if not matches_query:
-                                matches = False
-                                logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' didn't match query '{query_lower}'")
-                            else:
-                                logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' MATCHED query '{query_lower}'")
-                        
-                        # Check category match
-                        if category and category.lower() != business_type:
-                            matches = False
-                        
-                        # Check location match - more flexible
-                        if location:
-                            location_lower = normalize_location(location)
-                            business_city_norm = normalize_location(business_city)
-                            business_state_norm = normalize_location(business_state)
-                            
-                            # Handle state abbreviations and full names
-                            state_mappings = {
-                                "nv": "nevada", "nevada": "nv",
-                                "ca": "california", "california": "ca",
-                                "ny": "new york", "new york": "ny"
-                            }
-                            
-                            location_normalized = location_lower
-                            for abbrev, full in state_mappings.items():
-                                if abbrev in location_normalized:
-                                    location_normalized = location_normalized.replace(abbrev, full)
-                                if full in location_normalized:
-                                    location_normalized = location_normalized.replace(full, abbrev)
-                            
-                            # Match if location is in city, state, or contains key words
-                            location_words = location_lower.split()
-                            matches_location = (
-                                location_lower in business_city_norm or
-                                location_lower in business_state_norm or
-                                business_city_norm in location_lower or
-                                any(word in business_city_norm for word in location_words if len(word) > 2) or
-                                any(word in business_state_norm for word in location_words if len(word) > 2) or
-                                # Handle "Las Vegas" matching
-                                ("vegas" in location_lower and "vegas" in business_city_norm) or
-                                ("las vegas" in location_lower and "las vegas" in business_city_norm)
-                            )
-                            
-                            if not matches_location:
-                                matches = False
-                                logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' in {business_city_norm}, {business_state_norm} didn't match location '{location_lower}'")
-                            else:
-                                logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' matched location '{location_lower}'")
-                        
-                        if matches:
-                            # Get services
-                            services = [
-                                {
-                                    "id": svc.get("id", ""),
-                                    "name": svc.get("name", ""),
-                                    "description": svc.get("description", "")
-                                }
-                                for svc in business_data.get("services_config", [])[:5]
-                            ]
-                            
-                            business_result = {
-                                "business_id": business_id,
-                                "name": business_data.get("business_name", ""),
-                                "description": business_data.get("business_info", {}).get("description", ""),
-                                "category": business_type,
-                                "location": {
-                                    "city": business_data.get("location", {}).get("city", ""),
-                                    "state": business_data.get("location", {}).get("state", ""),
-                                    "address": business_data.get("location", {}).get("address", "")
-                                },
-                                "phone": business_data.get("contact_info", {}).get("phone", ""),
-                                "website": business_data.get("contact_info", {}).get("website", ""),
-                                "rating": 4.5,
-                                "services": services
-                            }
-                            businesses.append(business_result)
-                            logger.info(f"✓ Added business from in-memory store: {business_data.get('business_name')} (ID: {business_id})")
+                                from backend.production.shared_storage import BUSINESS_STORE as simple_store
+                            except ImportError:
+                                # Try importing the module and accessing the attribute
+                                import sys
+                                import os
+                                # Add parent directory to path if needed
+                                parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                                if parent_dir not in sys.path:
+                                    sys.path.insert(0, parent_dir)
+                                try:
+                                    from backend.production import shared_storage
+                                    simple_store = getattr(shared_storage, 'BUSINESS_STORE', None)
+                                except Exception as import_err:
+                                    logger.debug(f"Could not import shared_storage: {import_err}")
+                                    pass
                     
-                    logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
-                else:
-                    logger.debug("BUSINESS_STORE not found in routes_simple")
-            except Exception as store_error:
-                logger.error(f"In-memory store check failed: {store_error}", exc_info=True)
+                    if simple_store and len(simple_store) > 0:
+                        logger.info(f"Checking in-memory BUSINESS_STORE (fallback only) with {len(simple_store)} businesses")
+                        logger.info(f"Business IDs in store: {list(simple_store.keys())}")
+                        logger.warning("Using in-memory store as fallback - database should be primary source")
+                        for business_id, business_data in simple_store.items():
+                            logger.info(f"Checking business: {business_data.get('business_name', 'Unknown')} (ID: {business_id})")
+                            # Skip if already in results
+                            if any(b.get("business_id") == business_id for b in businesses):
+                                continue
+                            
+                            # Apply search filters
+                            matches = True
+                            business_name = business_data.get("business_name", "").lower()
+                            business_desc = business_data.get("business_info", {}).get("description", "").lower()
+                            business_type = business_data.get("business_type", "").lower()
+                            business_city = business_data.get("location", {}).get("city", "").lower()
+                            business_state = business_data.get("location", {}).get("state", "").lower()
+                            
+                            # Normalize location strings (remove punctuation, extra spaces)
+                            def normalize_location(loc_str):
+                                if not loc_str:
+                                    return ""
+                                return " ".join(loc_str.lower().replace(",", " ").split())
+                            
+                            # Check query match - more flexible matching
+                            if query:
+                                query_lower = query.lower().strip()
+                                query_words = query_lower.split()
+                                
+                                # Normalize query terms (handle "med spa" -> "medspa", "med-spa", etc.)
+                                normalized_query = query_lower.replace(" ", "").replace("-", "")
+                                normalized_name = business_name.replace(" ", "").replace("-", "")
+                                
+                                # Check name, description, and service names
+                                service_names = " ".join([
+                                    svc.get("name", "").lower() 
+                                    for svc in business_data.get("services_config", [])
+                                ])
+                                
+                                # Enhanced matching: check normalized strings, partial matches, and keyword matching
+                                query_matches = (
+                                    query_lower in business_name or
+                                    business_name in query_lower or
+                                    normalized_query in normalized_name or
+                                    normalized_name in normalized_query or
+                                    any(word in business_name for word in query_words if len(word) > 2) or
+                                    query_lower in business_desc or
+                                    any(word in business_desc for word in query_words if len(word) > 2) or
+                                    query_lower in service_names or
+                                    any(word in service_names for word in query_words if len(word) > 2)
+                                )
+                                
+                                # Very lenient matching: if ANY query word appears in name/description/services, it's a match
+                                # This ensures "med spa" matches "New Life New Image Med Spa"
+                                matches_query = (
+                                    query_lower in business_name or
+                                    query_lower in business_desc or
+                                    query_lower in service_names or
+                                    any(word in business_name for word in query_words if len(word) > 2) or
+                                    any(word in business_desc for word in query_words if len(word) > 2) or
+                                    any(word in service_names for word in query_words if len(word) > 2) or
+                                    # Very lenient: if normalized query appears anywhere
+                                    normalized_query in normalized_name or
+                                    normalized_name in normalized_query
+                                )
+                                
+                                if not matches_query:
+                                    matches = False
+                                    logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' didn't match query '{query_lower}'")
+                                else:
+                                    logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' MATCHED query '{query_lower}'")
+                            
+                            # Check category match
+                            if category and category.lower() != business_type:
+                                matches = False
+                            
+                            # Check location match - more flexible
+                            if location:
+                                location_lower = normalize_location(location)
+                                business_city_norm = normalize_location(business_city)
+                                business_state_norm = normalize_location(business_state)
+                                
+                                # Handle state abbreviations and full names
+                                state_mappings = {
+                                    "nv": "nevada", "nevada": "nv",
+                                    "ca": "california", "california": "ca",
+                                    "ny": "new york", "new york": "ny"
+                                }
+                                
+                                location_normalized = location_lower
+                                for abbrev, full in state_mappings.items():
+                                    if abbrev in location_normalized:
+                                        location_normalized = location_normalized.replace(abbrev, full)
+                                    if full in location_normalized:
+                                        location_normalized = location_normalized.replace(full, abbrev)
+                                
+                                # Match if location is in city, state, or contains key words
+                                location_words = location_lower.split()
+                                matches_location = (
+                                    location_lower in business_city_norm or
+                                    location_lower in business_state_norm or
+                                    business_city_norm in location_lower or
+                                    any(word in business_city_norm for word in location_words if len(word) > 2) or
+                                    any(word in business_state_norm for word in location_words if len(word) > 2) or
+                                    # Handle "Las Vegas" matching
+                                    ("vegas" in location_lower and "vegas" in business_city_norm) or
+                                    ("las vegas" in location_lower and "las vegas" in business_city_norm)
+                                )
+                                
+                                if not matches_location:
+                                    matches = False
+                                    logger.debug(f"Business '{business_data.get('business_name', 'Unknown')}' in {business_city_norm}, {business_state_norm} didn't match location '{location_lower}'")
+                                else:
+                                    logger.info(f"✓ Business '{business_data.get('business_name', 'Unknown')}' matched location '{location_lower}'")
+                            
+                            if matches:
+                                # Get services
+                                services = [
+                                    {
+                                        "id": svc.get("id", ""),
+                                        "name": svc.get("name", ""),
+                                        "description": svc.get("description", "")
+                                    }
+                                    for svc in business_data.get("services_config", [])[:5]
+                                ]
+                                
+                                business_result = {
+                                    "business_id": business_id,
+                                    "name": business_data.get("business_name", ""),
+                                    "description": business_data.get("business_info", {}).get("description", ""),
+                                    "category": business_type,
+                                    "location": {
+                                        "city": business_data.get("location", {}).get("city", ""),
+                                        "state": business_data.get("location", {}).get("state", ""),
+                                        "address": business_data.get("location", {}).get("address", "")
+                                    },
+                                    "phone": business_data.get("contact_info", {}).get("phone", ""),
+                                    "website": business_data.get("contact_info", {}).get("website", ""),
+                                    "rating": 4.5,
+                                    "services": services
+                                }
+                                businesses.append(business_result)
+                                logger.info(f"✓ Added business from in-memory store: {business_data.get('business_name')} (ID: {business_id})")
+                    
+                        logger.info(f"Found {len([b for b in businesses if b.get('business_id') in simple_store])} businesses from in-memory store")
+                    else:
+                        logger.debug("BUSINESS_STORE not found or empty")
+                except Exception as store_error:
+                    logger.error(f"In-memory store check failed: {store_error}", exc_info=True)
             
             # If no database results AND no query provided, include some example businesses
             # This helps users understand what BAIS can do

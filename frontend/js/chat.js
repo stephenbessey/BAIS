@@ -340,7 +340,12 @@ function removeLoadingIndicator(id) {
 
 async function checkApiStatus() {
     try {
-        const response = await fetch(`${API_BASE_URL}/api/v1/llm-webhooks/health`);
+        // Try the webhook health endpoint first
+        let response = await fetch(`${API_BASE_URL}/api/v1/llm-webhooks/health`);
+        if (!response.ok) {
+            // Fallback to main health endpoint if webhook health fails
+            response = await fetch(`${API_BASE_URL}/health`);
+        }
         if (response.ok) {
             apiStatus.textContent = 'Connected';
             apiStatus.className = 'api-status';
@@ -350,6 +355,7 @@ async function checkApiStatus() {
     } catch (error) {
         apiStatus.textContent = 'Disconnected';
         apiStatus.className = 'api-status error';
+        console.warn('Health check failed:', error);
     }
 }
 
