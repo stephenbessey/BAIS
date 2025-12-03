@@ -14,14 +14,13 @@ import logging
 from datetime import datetime
 from requests.exceptions import ConnectionError, Timeout, RequestException
 
+# Import BAIS tools directly
+from ...core.universal_tools import BAISUniversalToolHandler, BAISUniversalTool
+from ...core.database_models import DatabaseManager
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat Interface"])
-
-# Get BAIS base URL from environment
-BAIS_BASE_URL = os.getenv("BAIS_BASE_URL", "https://bais-production.up.railway.app")
-BAIS_TOOLS_URL = f"{BAIS_BASE_URL}/api/v1/llm-webhooks/tools/definitions"
-BAIS_WEBHOOK_URL = f"{BAIS_BASE_URL}/api/v1/llm-webhooks"
 
 
 class ChatMessage(BaseModel):
@@ -43,21 +42,30 @@ class ChatResponse(BaseModel):
     error: Optional[str] = None
 
 
-def get_bais_tool_definitions() -> List[Dict[str, Any]]:
-    """Get BAIS tool definitions"""
+def get_bais_tool_handler() -> BAISUniversalToolHandler:
+    """Get BAIS tool handler with database connection"""
     try:
-        response = requests.get(BAIS_TOOLS_URL, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if "tools" in data and isinstance(data["tools"], dict):
-            return data["tools"].get("claude", [])
-        elif "claude" in data:
-            return data.get("claude", [])
-        else:
-            return data.get("claude", [])
+        database_url = os.getenv("DATABASE_URL")
+        if database_url and database_url != "not_set":
+            try:
+                db_manager = DatabaseManager(database_url)
+                return BAISUniversalToolHandler(db_manager=db_manager)
+            except Exception as e:
+                logger.warning(f"Could not create database manager, using handler without DB: {e}")
+        return BAISUniversalToolHandler()
     except Exception as e:
-        logger.warning(f"Could not fetch BAIS tools: {e}")
-        # Return default tool definitions
+        logger.warning(f"Error creating tool handler: {e}")
+        return BAISUniversalToolHandler()
+
+
+def get_bais_tool_definitions() -> List[Dict[str, Any]]:
+    """Get BAIS tool definitions directly from the tool class"""
+    try:
+        tool_defs = BAISUniversalTool.get_tool_definitions()
+        return tool_defs.get("claude", [])
+    except Exception as e:
+        logger.warning(f"Could not get BAIS tool definitions: {e}")
+        # Return default tool definitions as fallback
         return [
             {
                 "name": "bais_search_businesses",
@@ -100,29 +108,36 @@ def get_bais_tool_definitions() -> List[Dict[str, Any]]:
         ]
 
 
-def call_bais_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Call a BAIS tool via webhook"""
+async def call_bais_tool(tool_name: str, tool_input: Dict[str, Any], handler: BAISUniversalToolHandler) -> Dict[str, Any]:
+    """Call a BAIS tool directly using the handler (no HTTP overhead)"""
     try:
-        response = requests.post(
-            f"{BAIS_WEBHOOK_URL}/claude/tool-use",
-            json={
-                "content": [{
-                    "name": tool_name,
-                    "input": tool_input,
-                    "id": "chat-call"
-                }]
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=30
-        )
-        response.raise_for_status()
-        result = response.json()
-        if result.get("success"):
-            return result.get("result", {})
+        if tool_name == "bais_search_businesses":
+            result = await handler.search_businesses(
+                query=tool_input.get("query", ""),
+                category=tool_input.get("category"),
+                location=tool_input.get("location")
+            )
+            return result if isinstance(result, list) else []
+            
+        elif tool_name == "bais_get_business_services":
+            result = await handler.get_business_services(
+                business_id=tool_input.get("business_id", "")
+            )
+            return result if isinstance(result, list) else []
+            
+        elif tool_name == "bais_execute_service":
+            result = await handler.execute_service(
+                business_id=tool_input.get("business_id", ""),
+                service_id=tool_input.get("service_id", ""),
+                parameters=tool_input.get("parameters", {}),
+                customer_info=tool_input.get("customer_info", {})
+            )
+            return result if isinstance(result, dict) else {}
         else:
-            return {"error": result.get("error", "Unknown error")}
+            logger.warning(f"Unknown tool name: {tool_name}")
+            return {"error": f"Unknown tool: {tool_name}"}
     except Exception as e:
-        logger.error(f"Error calling BAIS tool {tool_name}: {e}")
+        logger.error(f"Error calling BAIS tool {tool_name}: {e}", exc_info=True)
         return {"error": str(e)}
 
 
@@ -134,6 +149,9 @@ async def chat_with_claude(messages: List[ChatMessage], api_key: str) -> ChatRes
         raise HTTPException(status_code=500, detail="anthropic package not installed")
     
     client = anthropic.Anthropic(api_key=api_key)
+    
+    # Get BAIS tool handler
+    handler = get_bais_tool_handler()
     
     # Get BAIS tools
     bais_tools = get_bais_tool_definitions()
@@ -183,8 +201,8 @@ async def chat_with_claude(messages: List[ChatMessage], api_key: str) -> ChatRes
                 "input": tool_use.input
             })
             
-            # Call BAIS tool
-            tool_result = call_bais_tool(tool_use.name, tool_use.input)
+            # Call BAIS tool directly (no HTTP overhead)
+            tool_result = await call_bais_tool(tool_use.name, tool_use.input, handler)
             
             # Add tool result to conversation
             claude_messages.append({
@@ -213,6 +231,8 @@ async def chat_with_claude(messages: List[ChatMessage], api_key: str) -> ChatRes
 
 async def chat_with_ollama(messages: List[ChatMessage], host: str, model_name: str) -> ChatResponse:
     """Chat with Ollama using BAIS tools"""
+    # Get BAIS tool handler
+    handler = get_bais_tool_handler()
     bais_tools = get_bais_tool_definitions()
     
     system_prompt = """You are a helpful AI assistant with access to BAIS (Business-Agent Integration Standard) tools for discovering and booking with businesses.
@@ -283,14 +303,16 @@ After I execute the tool and provide results, I will give you the tool results a
                     pass
         
         if tool_name and tool_input:
-            tool_result = call_bais_tool(tool_name, tool_input)
+            tool_result = await call_bais_tool(tool_name, tool_input, handler)
             logger.info(f"Tool {tool_name} returned: {type(tool_result)}, length: {len(tool_result) if isinstance(tool_result, (list, dict)) else 'N/A'}")
             
-            # Extract result from UniversalToolResponse if needed
-            if isinstance(tool_result, dict) and "result" in tool_result:
-                actual_result = tool_result["result"]
-            else:
-                actual_result = tool_result
+            # Tool result is already the actual result (not wrapped in response)
+            actual_result = tool_result
+            
+            # Handle error case
+            if isinstance(actual_result, dict) and "error" in actual_result:
+                logger.error(f"Tool {tool_name} returned error: {actual_result.get('error')}")
+                actual_result = [] if tool_name == "bais_search_businesses" else {}
             
             logger.info(f"Actual result type: {type(actual_result)}, is list: {isinstance(actual_result, list)}, length: {len(actual_result) if isinstance(actual_result, list) else 'N/A'}")
             if isinstance(actual_result, list) and len(actual_result) > 0:
