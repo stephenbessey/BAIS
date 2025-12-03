@@ -367,7 +367,31 @@ async def list_all_businesses_debug():
                 "businesses": []
             }
         
-        from ..core.database_models import DatabaseManager, Business
+        # Try multiple import paths
+        DatabaseManager = None
+        Business = None
+        try:
+            from core.database_models import DatabaseManager, Business
+        except ImportError:
+            try:
+                from .core.database_models import DatabaseManager, Business
+            except ImportError:
+                try:
+                    from backend.production.core.database_models import DatabaseManager, Business
+                except ImportError:
+                    return {
+                        "database_configured": True,
+                        "error": "Could not import database models",
+                        "businesses": []
+                    }
+        
+        if not DatabaseManager or not Business:
+            return {
+                "database_configured": True,
+                "error": "Database models not available",
+                "businesses": []
+            }
+        
         db_manager = DatabaseManager(database_url)
         with db_manager.get_session() as session:
             all_businesses = session.query(Business).all()
