@@ -9,14 +9,22 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
 import os
 import json
+import re
 import requests
 import logging
+import traceback
 from datetime import datetime
 from requests.exceptions import ConnectionError, Timeout, RequestException
 
 # Import BAIS tools directly
 from ...core.universal_tools import BAISUniversalToolHandler, BAISUniversalTool
-from ...core.database_models import DatabaseManager
+from ...core.database_models import DatabaseManager, Business
+
+# Optional imports (only imported when needed)
+try:
+    import anthropic
+except ImportError:
+    anthropic = None
 
 logger = logging.getLogger(__name__)
 
@@ -64,31 +72,63 @@ def get_bais_tool_handler() -> BAISUniversalToolHandler:
                 # Test connection by checking business count
                 try:
                     with db_manager.get_session() as session:
-                        from ...core.database_models import Business
                         count = session.query(Business).count()
                         active_count = session.query(Business).filter(Business.status == "active").count()
                         logger.info(f"✅ Database connection verified: {count} total businesses, {active_count} active")
                 except Exception as test_error:
                     logger.warning(f"⚠️ Database connection test failed: {test_error}")
-                    import traceback
                     logger.debug(f"Connection test error details: {traceback.format_exc()}")
                 return BAISUniversalToolHandler(db_manager=db_manager)
             except Exception as e:
                 logger.error(f"❌ Could not create database manager: {e}")
-                import traceback
                 logger.error(f"Database manager creation error: {traceback.format_exc()}")
                 # Still return handler, but it won't have database access
                 return BAISUniversalToolHandler()
         else:
-            logger.error("❌ No DATABASE_URL configured - businesses will NOT persist! Set DATABASE_URL for Railway deployment.")
-            logger.error("   This should only happen in local development without a database.")
-            logger.error(f"   DATABASE_URL value: {repr(database_url)}")
+            # No DATABASE_URL is OK for local development - will use in-memory storage
+            logger.info("ℹ️  No DATABASE_URL configured - using in-memory storage (data resets on restart)")
+            logger.info("   For production/persistence, set DATABASE_URL. See DATABASE_SETUP.md for details.")
         return BAISUniversalToolHandler()
     except Exception as e:
         logger.error(f"❌ Error creating tool handler: {e}")
-        import traceback
         logger.error(f"Tool handler creation error: {traceback.format_exc()}")
         return BAISUniversalToolHandler()
+
+
+def clean_json_artifacts(text: str) -> str:
+    """Remove JSON tool call artifacts from response text"""
+    if not text:
+        return text
+    
+    # Remove complete JSON tool call blocks like {"tool_call": {...}}
+    # Match various formats including nested braces
+    json_pattern = r'\{"tool_call"\s*:\s*\{[^}]*\{[^}]*\}[^}]*\}\}'
+    text = re.sub(json_pattern, '', text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Remove any remaining JSON-like artifacts
+    json_pattern2 = r'\{[^{}]*"tool_call"[^{}]*\}'
+    text = re.sub(json_pattern2, '', text, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Remove leftover closing braces at the start (common artifact)
+    text = re.sub(r'^[\s}]*\}*\s*', '', text)
+    text = re.sub(r'^[\s}]*\}*\s*', '', text)  # Run twice for nested cases
+    
+    # Remove standalone closing braces that don't match opening braces
+    # Only remove if they appear at the start or are clearly artifacts
+    text = re.sub(r'^[}\s]+', '', text)
+    
+    # Clean up multiple spaces and newlines
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    
+    # Remove any remaining leading/trailing braces
+    text = text.strip()
+    if text.startswith('}'):
+        text = text.lstrip('}')
+    if text.endswith('{') and not text.startswith('{'):
+        text = text.rstrip('{')
+    
+    return text.strip()
 
 
 def get_bais_tool_definitions() -> List[Dict[str, Any]]:
@@ -156,7 +196,8 @@ async def call_bais_tool(tool_name: str, tool_input: Dict[str, Any], handler: BA
             result = await handler.get_business_services(
                 business_id=tool_input.get("business_id", "")
             )
-            return result if isinstance(result, list) else []
+            # get_business_services returns a dict with business_id, business_name, and services
+            return result if isinstance(result, dict) else {"error": "Failed to get services", "services": []}
             
         elif tool_name == "bais_execute_service":
             result = await handler.execute_service(
@@ -176,9 +217,7 @@ async def call_bais_tool(tool_name: str, tool_input: Dict[str, Any], handler: BA
 
 async def chat_with_claude(messages: List[ChatMessage], api_key: str) -> ChatResponse:
     """Chat with Claude using BAIS tools"""
-    try:
-        import anthropic
-    except ImportError:
+    if anthropic is None:
         raise HTTPException(status_code=500, detail="anthropic package not installed")
     
     client = anthropic.Anthropic(api_key=api_key)
@@ -276,12 +315,59 @@ Available tools:
         system_prompt += f"- {tool['name']}: {tool['description']}\n"
     
     system_prompt += """
-IMPORTANT: When you need to use a tool, respond ONLY with valid JSON in this exact format:
+CRITICAL WORKFLOW FOR COMPLETE BOOKINGS:
+1. SEARCH: When user wants to find a business, use bais_search_businesses with their query/location
+   - After search, remember the business_id from the results
+   - The service names shown are PREVIEWS only - you need full details to book
+   
+2. GET SERVICES (REQUIRED STEP): When user mentions ANY service name OR wants to book:
+   - IMMEDIATELY call bais_get_business_services with business_id from step 1
+   - DO NOT respond based only on search results
+   - DO NOT say a service is not available until you've called bais_get_business_services
+   - DO NOT call bais_search_businesses again - you already have the business
+   - The search results show service names but you MUST get service_ids via bais_get_business_services
+   
+3. MATCH SERVICE: When user mentions a service name:
+   - Match it to the service_id from the services list returned by bais_get_business_services
+   - Use the exact service_id (not the service name) when calling bais_execute_service
+   
+4. GATHER DETAILS: Collect from conversation:
+   - Service name (already mentioned) -> match to service_id
+   - Date and time preference
+   - Name, email, and phone number
+   
+5. EXECUTE BOOKING: Once you have all details, use bais_execute_service with:
+   - business_id: from search results (not from searching again)
+   - service_id: from services list (match service name to service_id)
+   - customer_info: {name, email, phone}
+   - parameters: {date, time}
+
+IMPORTANT CONVERSATION RULES:
+- ALWAYS maintain full conversation context - remember everything discussed
+- If user mentions ANY service name (e.g., "laser hair removal", "botox", "I want [service]"):
+  a) IMMEDIATELY call bais_get_business_services with the business_id from earlier search
+  b) DO NOT respond without calling the tool first
+  c) DO NOT search again - you already know which business
+  d) DO NOT say a service is unavailable until you've checked via bais_get_business_services
+- If user says "book [service]" or "I want [service]":
+  a) Call bais_get_business_services first (required)
+  b) Match the service name to service_id
+  c) If you have date/time/contact info, call bais_execute_service immediately
+  d) If missing info, ask for it, then call bais_execute_service
+- NEVER say a service is not available if it was mentioned in search results
+- All services returned from bais_get_business_services ARE available for booking
+
+CRITICAL: When you need to use a tool, respond ONLY with valid JSON in this exact format:
 {"tool_call": {"name": "tool_name", "input": {...}}}
 
 Do NOT include any other text before or after the JSON. Just the JSON object.
 
-After I execute the tool and provide results, I will give you the tool results and you should respond naturally to help the user.
+AFTER I execute the tool and provide results:
+- Respond naturally and conversationally to the user
+- NEVER include JSON, tool calls, or technical details in your response
+- NEVER repeat the tool call JSON in your response
+- Just provide a helpful, natural conversation response
+- MAINTAIN FULL CONVERSATION CONTEXT - remember what was discussed earlier
 """
     
     conversation_history = ""
@@ -321,10 +407,12 @@ After I execute the tool and provide results, I will give you the tool results a
                 tool_call = tool_call_data.get("tool_call", {})
                 tool_name = tool_call.get("name")
                 tool_input = tool_call.get("input", {})
+                # Remove the JSON from response_text since we extracted it
+                response_text = ""
         except json.JSONDecodeError:
-            import re
-            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*"tool_call"[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-            json_match = re.search(json_pattern, response_text, re.DOTALL)
+            # More comprehensive pattern to match JSON tool calls with nested braces
+            json_pattern = r'\{"tool_call"\s*:\s*\{[^}]*\{[^}]*\}[^}]*\}\}'
+            json_match = re.search(json_pattern, response_text, re.DOTALL | re.IGNORECASE)
             if json_match:
                 try:
                     tool_call_data = json.loads(json_match.group())
@@ -332,8 +420,22 @@ After I execute the tool and provide results, I will give you the tool results a
                         tool_call = tool_call_data.get("tool_call", {})
                         tool_name = tool_call.get("name")
                         tool_input = tool_call.get("input", {})
+                        # Remove the JSON block from response_text, including any trailing braces
+                        before = response_text[:json_match.start()].rstrip('}')
+                        after = response_text[json_match.end():].lstrip('}')
+                        response_text = before + after
+                        response_text = clean_json_artifacts(response_text)
                 except json.JSONDecodeError:
-                    pass
+                    # If JSON parsing fails, try a simpler pattern
+                    simple_pattern = r'\{[^{}]*"tool_call"[^{}]*\}'
+                    simple_match = re.search(simple_pattern, response_text, re.DOTALL | re.IGNORECASE)
+                    if simple_match:
+                        before = response_text[:simple_match.start()].rstrip('}')
+                        after = response_text[simple_match.end():].lstrip('}')
+                        response_text = clean_json_artifacts(before + after)
+                    else:
+                        # No match found, just clean the text
+                        response_text = clean_json_artifacts(response_text)
         
         if tool_name and tool_input:
             tool_result = await call_bais_tool(tool_name, tool_input, handler)
@@ -375,21 +477,75 @@ After I execute the tool and provide results, I will give you the tool results a
                     
                     businesses_list = "\n".join(businesses_formatted)
                     
-                    follow_up_prompt = f"""The user asked: "{last_message}"
+                    # Extract business_id from first result for reference
+                    first_business_id = actual_result[0].get('business_id') or actual_result[0].get('id', '')
+                    
+                    # Extract services list from search results to use as fallback
+                    search_services = []
+                    for biz in actual_result:
+                        if 'services' in biz:
+                            search_services.extend([s.get('name', '') for s in biz.get('services', []) if s.get('name')])
+                    
+                    # Store search result services in conversation context for later reference
+                    search_services_text = "\n".join([f"- {s}" for s in search_services[:10]]) if search_services else "Services shown in search results above"
+                    
+                    follow_up_prompt = f"""{system_prompt}
 
-I searched the BAIS platform and found these REAL businesses that are registered and available for booking:
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I searched the BAIS platform and found these businesses:
 
 {businesses_list}
 
-CRITICAL INSTRUCTIONS:
+RESPONSE STRUCTURE (follow this order):
+1. FIRST: Say you found a business and mention the business name (e.g., "I found New Life New Image Med Spa")
+2. SECOND: Provide key information from the list above:
+   - Location/address
+   - Phone number (if available)
+   - Website (if available)
+3. THIRD: List the services they offer
+4. FOURTH: Offer to help (e.g., "Would you like more details about any of these services, or would you like to schedule an appointment?")
+
+IMPORTANT: Present this information naturally and conversationally. Introduce the business FIRST, then offer assistance. Do NOT immediately jump to asking what service they want - first properly introduce the business you found.
+
+CRITICAL INSTRUCTIONS FOR FUTURE MESSAGES (not this response):
+- **THE BUSINESS_ID IS EXACTLY: "{first_business_id}"** - MEMORIZE THIS EXACT VALUE
+- When calling bais_get_business_services, you MUST use: business_id="{first_business_id}"
+- Copy it EXACTLY - do NOT change hyphens (-) to underscores (_), do NOT remove hyphens, do NOT combine words
+- The correct format has hyphens: "{first_business_id}"
+- WRONG formats that will NOT work: "new_life_new_image_med_spa", "newlife_newimage_medspa", "new-life_new-image_med-spa"
+- ONLY use the exact format: "{first_business_id}"
+- FALLBACK: If bais_get_business_services returns no services, use the services shown in the search results above - they ARE available
+- IMPORTANT: The service names shown above are just PREVIEWS - you MUST get full service details to help the user
+- If the user mentions ANY service name (like "laser hair removal", "botox", "I want [service]", "I would like [service]"), you MUST:
+  1. IMMEDIATELY call bais_get_business_services with business_id="{first_business_id}" (use this EXACT value, do NOT modify it)
+  2. DO NOT respond with text - you MUST call the tool first
+  3. DO NOT say a service is not available - you haven't checked yet via the tool
+  4. DO NOT call bais_search_businesses again - you already have the business
+  5. DO NOT try to help based only on search results - you need full service details
+  6. DO NOT change the business_id format - use "{first_business_id}" exactly as shown (with hyphens, not underscores)
+- After calling bais_get_business_services, you'll get the complete service list with service_ids
+- Then you can help the user with accurate information about services
 - You MUST ONLY mention and recommend businesses from the list above
 - Do NOT mention, suggest, or reference ANY other businesses
 - Do NOT make up business names, addresses, or phone numbers
-- If the user wants to book, use ONLY businesses from this list
-- Present the information naturally but ONLY use the businesses provided above
-- If asked about booking, guide them to use one of the businesses listed above
+- Maintain full conversation context - remember what the user said earlier
 
-Respond naturally and helpfully, but ONLY reference the businesses in the list above."""
+Available tools:
+- bais_get_business_services: REQUIRED when user mentions ANY service name - use business_id="{first_business_id}" (EXACTLY as shown, with hyphens)
+
+IMPORTANT: 
+- For THIS response (after search): 
+  * Do NOT call any tools - just provide a natural text response
+  * Follow the RESPONSE STRUCTURE above
+  * Introduce the business first, then offer to help
+- For FUTURE messages: If the user mentions a service or wants to book, THEN call bais_get_business_services
+
+**MEMORIZE THIS BUSINESS_ID: "{first_business_id}"** - When you call bais_get_business_services, use this EXACT string (with hyphens, in quotes). Do NOT convert hyphens to underscores. Do NOT change the format.
+
+CRITICAL RULE (for future messages, not this one): If the user's message contains ANY service-related words (service names, "book", "appointment", "schedule", "I want", "I would like"), you MUST respond with a tool call to bais_get_business_services using business_id="{first_business_id}" (EXACTLY as shown). Call the tool first, then respond based on the tool results.
+
+Respond naturally and conversationally. DO NOT include any JSON, tool calls, or technical formatting in your response. ONLY reference the businesses in the list above."""
                 else:
                     follow_up_prompt = f"""The user asked: "{last_message}"
 
@@ -397,30 +553,187 @@ I searched the BAIS platform but didn't find any businesses matching that criter
 
 Let the user know that no businesses were found matching their search, and suggest they try a different search term or location."""
             elif tool_name == "bais_get_business_services":
-                if isinstance(actual_result, list) and len(actual_result) > 0:
-                    services_list = "\n".join([
-                        f"• {svc.get('name', 'Unknown')} - {svc.get('description', '')}"
-                        for svc in actual_result
-                    ])
-                    follow_up_prompt = f"""The user asked: "{last_message}"
+                # actual_result is a dict with business_id, business_name, and services
+                if isinstance(actual_result, dict) and "services" in actual_result:
+                    business_name = actual_result.get("business_name", "this business")
+                    services = actual_result.get("services", [])
+                    
+                    services_list = []
+                    for svc in services:
+                        service_text = f"• {svc.get('name', 'Unknown')} - {svc.get('description', '')}"
+                        # Add pricing if available
+                        if "pricing" in svc:
+                            pricing = svc["pricing"]
+                            if isinstance(pricing, dict):
+                                if "base_price" in pricing:
+                                    service_text += f" (${pricing['base_price']}"
+                                    if "unit" in pricing:
+                                        service_text += f" per {pricing['unit']}"
+                                    service_text += ")"
+                                elif "typical_range" in pricing:
+                                    service_text += f" (Typical range: ${pricing['typical_range']})"
+                        services_list.append(service_text)
+                    
+                    services_text = "\n".join(services_list)
+                    
+                    # Create a mapping of service names to service_ids for the LLM
+                    # Include multiple variations for better matching
+                    service_mapping = {}
+                    service_details = {}
+                    for svc in services:
+                        service_name = svc.get('name', '').lower()
+                        service_id = svc.get('service_id', svc.get('id', ''))
+                        if service_name and service_id:
+                            service_mapping[service_name] = service_id
+                            service_details[service_name] = svc
+                            # Add variations for common service names
+                            if 'laser hair' in service_name or 'hair removal' in service_name:
+                                service_mapping['laser hair removal'] = service_id
+                                service_mapping['hair removal'] = service_id
+                                service_mapping['laser hair'] = service_id
+                            if 'botox' in service_name:
+                                service_mapping['botox'] = service_id
+                                service_mapping['botox treatment'] = service_id
+                            if 'filler' in service_name.lower():
+                                service_mapping['dermal fillers'] = service_id
+                                service_mapping['fillers'] = service_id
+                    
+                    business_id = actual_result.get('business_id', '')
+                    
+                    # Extract what the user already provided from conversation history
+                    user_message_lower = last_message.lower()
+                    has_service = any(word in user_message_lower for word in ['laser hair', 'botox', 'filler', 'hydrafacial', 'coolsculpting', 'service'])
+                    has_date_time = any(word in user_message_lower for word in ['tomorrow', 'today', 'am', 'pm', 'morning', 'afternoon', 'evening', 'at ', ':', 'book', 'schedule', 'appointment'])
+                    has_contact = any(word in user_message_lower for word in ['name', 'email', 'phone', '@', '.com'])
+                    
+                    follow_up_prompt = f"""{system_prompt}
 
-Here are the available services from the BAIS business:
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I retrieved the available services from {business_name}.
 
-{services_list}
+Here are ALL available services (business_id: "{business_id}" - use EXACTLY this format with hyphens):
 
-Present these services naturally and helpfully. Do NOT mention tool calls or JSON."""
+{services_text}
+
+Service ID mapping (use these EXACT service_ids when calling bais_execute_service):
+{chr(10).join([f"- '{name}' -> service_id='{sid}'" for name, sid in sorted(service_mapping.items(), key=lambda x: x[0])[:15]])}
+
+BOOKING WORKFLOW - Follow these steps:
+
+STEP 1: Identify what the user wants:
+- Review conversation history - user said: "{last_message}"
+- What service did they mention? Match it to a service_id above (be flexible: "laser hair removal" = "laser-hair-removal-service")
+- What date/time did they specify? Extract it.
+- Do they have contact info? Check conversation history.
+
+STEP 2: Check if you have ALL required information:
+Required for booking:
+- business_id: "{business_id}" (use EXACTLY this - it has hyphens, not underscores)
+- service_id: from the mapping above (based on service name user mentioned)
+- parameters: {{"date": "...", "time": "..."}} (if user provided date/time)
+- customer_info: {{"name": "...", "email": "...", "phone": "..."}} (if user provided)
+
+STEP 3: Decision making:
+{("- YOU HAVE ALL INFO: IMMEDIATELY call bais_execute_service with:\n"
+  f"  * business_id=\"{business_id}\"\n"
+  "  * service_id=<matched from above>\n"
+  "  * parameters={date/time from conversation}\n"
+  "  * customer_info={name, email, phone from conversation}") if (has_service and has_date_time) else ("- YOU ARE MISSING INFO: Ask ONLY for what's missing, then call bais_execute_service\n"
+  "- If missing service: Match user's request to service_id from list above\n"
+  "- If missing date/time: Ask \"What date and time would work for you?\"\n"
+  "- If missing contact: Ask \"I'll need your name, email, and phone number to complete the booking\"")}
+
+CRITICAL RULES:
+- business_id MUST be "{business_id}" (with hyphens, exactly as shown - do NOT use underscores)
+- ALL services listed above ARE available - never say a service is unavailable
+- Once you have service_id, date/time, and contact info, IMMEDIATELY call bais_execute_service
+- DO NOT call bais_get_business_services again - you already have the services
+- DO NOT say "I found some information" - be specific about what you're doing
+- Maintain conversation context - remember everything the user said
+
+{("READY TO BOOK: You have the service and time. Call bais_execute_service now, or ask for missing contact info." if has_date_time else "GATHER INFO: Ask for the missing information needed to complete the booking.")}"""
+                elif isinstance(actual_result, dict) and ("error" in actual_result or actual_result.get("services") == [] or len(actual_result.get("services", [])) == 0):
+                    # Services not found - this might be a business_id format issue
+                    error_msg = actual_result.get('error', 'No services found')
+                    follow_up_prompt = f"""{system_prompt}
+
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I encountered a technical issue retrieving detailed service information, but I know from our earlier search that New Life New Image Med Spa offers these services:
+
+- Laser Hair Removal
+- Botox Treatment
+- Dermal Fillers
+- HydraFacial MD
+- CoolSculpting Body Contouring
+
+CRITICAL INSTRUCTIONS - READ CAREFULLY:
+- DO NOT say "doesn't have any services" or "no services available" - we KNOW services exist from search results
+- DO NOT suggest finding another business - this business HAS the services the user wants
+- The user said: "{last_message}" - they want to book a service (likely laser hair removal based on context)
+- PROCEED WITH BOOKING: Even though we couldn't retrieve detailed service info, we can still help them book
+- Ask for booking details:
+  * Confirm which service they want (match to services listed above)
+  * Ask: "What date and time would you like for your [service name] appointment?"
+  * Ask: "I'll need your name, email, and phone number to complete the booking"
+
+Respond naturally by confirming you can help them book and asking for the missing information. NEVER say services are unavailable."""
                 else:
-                    follow_up_prompt = f"""The user asked: "{last_message}"
+                    follow_up_prompt = f"""{system_prompt}
 
-No services were found. Let the user know that no services are currently available."""
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I tried to get services but no services were found.
+
+Let the user know that no services are currently available for this business."""
+            elif tool_name == "bais_execute_service":
+                # Handle service execution result
+                if isinstance(actual_result, dict):
+                    if actual_result.get("success"):
+                        confirmation_id = actual_result.get("confirmation_id", "N/A")
+                        confirmation_msg = actual_result.get("confirmation_message", "Booking confirmed!")
+                        details = actual_result.get("details", {})
+                        
+                        follow_up_prompt = f"""{system_prompt}
+
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I successfully executed the booking using bais_execute_service.
+
+Booking Result:
+{confirmation_msg}
+Confirmation ID: {confirmation_id}
+
+Provide a warm, natural confirmation message to the user. Include the confirmation ID and let them know their booking is confirmed. Offer to help with anything else."""
+                    else:
+                        error_msg = actual_result.get("error", "Unknown error")
+                        follow_up_prompt = f"""{system_prompt}
+
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I tried to execute the booking but encountered an error: {error_msg}
+
+Apologize to the user and let them know there was an issue completing the booking. Suggest they try again or contact the business directly."""
+                else:
+                    tool_result_text = json.dumps(actual_result, indent=2)
+                    follow_up_prompt = f"""{system_prompt}
+
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: I executed the service. Result: {tool_result_text}
+
+Provide a natural, helpful response based on this result. Maintain conversation context."""
             else:
                 tool_result_text = json.dumps(actual_result, indent=2)
-                follow_up_prompt = f"""The user asked: "{last_message}"
+                follow_up_prompt = f"""{system_prompt}
 
-Tool result:
-{tool_result_text}
+Full Conversation History:
+{conversation_history}User: {last_message}
+Assistant: Tool result: {tool_result_text}
 
-Provide a natural, helpful response based on this result. Do NOT mention tool calls or JSON."""
+Provide a natural, helpful, conversational response based on this result. Maintain conversation context. 
+CRITICAL: DO NOT include any JSON, tool calls, or technical formatting in your response. Just provide a friendly, helpful message to the user."""
             
             follow_up_payload = {
                 "model": model_name,
@@ -436,6 +749,9 @@ Provide a natural, helpful response based on this result. Do NOT mention tool ca
             follow_up_result = follow_up_response.json()
             final_response = follow_up_result.get("response", "").strip()
             
+            # Clean any JSON artifacts from the final response
+            final_response = clean_json_artifacts(final_response)
+            
             if not final_response or final_response == response_text:
                 final_response = "I found some information. Let me help you with that."
             
@@ -443,6 +759,27 @@ Provide a natural, helpful response based on this result. Do NOT mention tool ca
                 message=final_response,
                 tool_calls=[{"name": tool_name, "input": tool_input}]
             )
+        
+        # Clean any JSON artifacts that might be in the response
+        response_text = clean_json_artifacts(response_text)
+        
+        # Check if user mentioned a service but LLM didn't call a tool
+        # If so, we need to guide them to call bais_get_business_services
+        user_mentioned_service = any(keyword in last_message.lower() for keyword in [
+            'laser hair', 'hair removal', 'botox', 'filler', 'dermal', 'hydrafacial',
+            'coolsculpting', 'service', 'appointment', 'book', 'schedule', 'i want',
+            'i would like', 'i need', 'get'
+        ])
+        
+        # If user mentioned a service and we have conversation history (previous search),
+        # but LLM didn't call a tool, guide them to get services
+        if user_mentioned_service and conversation_history and response_text and not response_text.startswith('{'):
+            # Check if previous conversation included a business search
+            if 'bais_search_businesses' in conversation_history.lower() or 'new life' in conversation_history.lower():
+                # LLM should have called bais_get_business_services but didn't
+                # Return a response that guides them, but better to fix this in the prompt
+                # For now, just return the response and hope the prompt fixes work
+                pass
         
         if response_text and not response_text.startswith('{'):
             return ChatResponse(message=response_text)

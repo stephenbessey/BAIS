@@ -51,6 +51,45 @@ PORT=${PORT:-8000}
 echo -e "${GREEN}✓${NC} Prerequisites checked"
 echo ""
 
+# Shutdown any running BAIS services
+echo -e "${YELLOW}🔄 Checking for running BAIS services...${NC}"
+
+# Find and kill processes running uvicorn with main_railway_final
+RUNNING_UVICORN=$(pgrep -f "uvicorn.*main_railway_final" 2>/dev/null || true)
+if [ -n "$RUNNING_UVICORN" ]; then
+    echo -e "   Found running uvicorn processes (PIDs: $RUNNING_UVICORN)"
+    echo -e "   ${YELLOW}Stopping existing BAIS server...${NC}"
+    pkill -f "uvicorn.*main_railway_final" 2>/dev/null || true
+    sleep 2
+    echo -e "   ${GREEN}✓${NC} Stopped existing BAIS server"
+fi
+
+# Check if port is in use and kill the process using it
+PORT_IN_USE=$(lsof -ti:$PORT 2>/dev/null || true)
+if [ -n "$PORT_IN_USE" ]; then
+    echo -e "   Port $PORT is in use by process(es): $PORT_IN_USE"
+    echo -e "   ${YELLOW}Freeing port $PORT...${NC}"
+    kill -9 $PORT_IN_USE 2>/dev/null || true
+    sleep 1
+    echo -e "   ${GREEN}✓${NC} Port $PORT is now available"
+fi
+
+# Also check for any Python processes running main_railway_final
+RUNNING_PYTHON=$(pgrep -f "python.*main_railway_final" 2>/dev/null || true)
+if [ -n "$RUNNING_PYTHON" ]; then
+    echo -e "   Found running Python BAIS processes (PIDs: $RUNNING_PYTHON)"
+    echo -e "   ${YELLOW}Stopping...${NC}"
+    pkill -f "python.*main_railway_final" 2>/dev/null || true
+    sleep 1
+    echo -e "   ${GREEN}✓${NC} Stopped Python BAIS processes"
+fi
+
+if [ -z "$RUNNING_UVICORN" ] && [ -z "$PORT_IN_USE" ] && [ -z "$RUNNING_PYTHON" ]; then
+    echo -e "   ${GREEN}✓${NC} No running BAIS services found"
+fi
+
+echo ""
+
 # Display configuration info
 echo -e "${BLUE}📋 Configuration:${NC}"
 echo "   Backend: backend/production/main_railway_final.py"

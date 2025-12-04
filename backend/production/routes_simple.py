@@ -8,10 +8,12 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional, Tuple
+import os
+import re
 import logging
 import uuid
+import traceback
 from datetime import datetime
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +177,6 @@ def register_business_to_database(request: BusinessRegistrationRequest, database
 async def register_business(request: BusinessRegistrationRequest):
     """Register a new business - stores in database and memory for immediate discoverability"""
     try:
-        import os
-        import uuid
-        from datetime import datetime as dt
         
         # Generate business ID
         business_id = generate_business_id(request.business_name)
@@ -403,8 +402,6 @@ async def get_system_status():
 @api_router.get("/businesses/debug/list", tags=["Business Management"])
 async def list_all_businesses_debug():
     """Debug endpoint to list all businesses in database and memory"""
-    import os
-    import traceback
     
     businesses_list = []
     database_configured = False

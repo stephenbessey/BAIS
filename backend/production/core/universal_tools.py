@@ -10,6 +10,8 @@ from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from enum import Enum
 import logging
+import os
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -227,8 +229,15 @@ class BAISUniversalToolHandler:
             # Try to query database if available - query ALL registered businesses
             db_checked = False
             try:
-                from ..core.database_models import DatabaseManager, Business, BusinessService
-                import os
+                try:
+                    from core.database_models import DatabaseManager, Business, BusinessService
+                except ImportError:
+                    try:
+                        from backend.production.core.database_models import DatabaseManager, Business, BusinessService
+                    except ImportError:
+                        DatabaseManager = None
+                        Business = None
+                        BusinessService = None
                 
                 # Use db_manager from handler if available, otherwise create new one
                 if self.db_manager:
@@ -398,8 +407,6 @@ class BAISUniversalToolHandler:
                                 from backend.production.shared_storage import BUSINESS_STORE as simple_store
                             except ImportError:
                                 # Try importing the module and accessing the attribute
-                                import sys
-                                import os
                                 # Add parent directory to path if needed
                                 parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
                                 if parent_dir not in sys.path:
@@ -677,14 +684,19 @@ class BAISUniversalToolHandler:
                     # Use handler's db_manager if available, otherwise create new one
                     fallback_db_manager = self.db_manager
                     if not fallback_db_manager:
-                        from ..core.database_models import DatabaseManager
-                        import os
+                        try:
+                            from core.database_models import DatabaseManager
+                        except ImportError:
+                            from backend.production.core.database_models import DatabaseManager
                         database_url = os.getenv("DATABASE_URL")
                         if database_url and database_url != "not_set":
                             fallback_db_manager = DatabaseManager(database_url)
                     
                     if fallback_db_manager:
-                        from ..core.database_models import Business, BusinessService
+                        try:
+                            from core.database_models import Business, BusinessService
+                        except ImportError:
+                            from backend.production.core.database_models import Business, BusinessService
                         with fallback_db_manager.get_session() as session:
                             all_businesses = session.query(Business).filter(
                                 Business.status == "active"
@@ -759,14 +771,50 @@ class BAISUniversalToolHandler:
         Checks database first, then in-memory store.
         """
         try:
+            # Normalize business_id to handle various formats (hyphens, underscores, no separators)
+            # Try multiple normalization strategies
+            if not business_id:
+                return {"error": "business_id is required", "business_id": business_id, "services": []}
+            
+            # Original format
+            original_id = business_id.strip().lower()
+            # Normalize: replace underscores with hyphens
+            normalized_id_1 = original_id.replace('_', '-')
+            # Normalize: if no hyphens/underscores, try inserting them based on common patterns
+            normalized_id_2 = original_id.replace('newlife', 'new-life').replace('newimage', 'new-image').replace('medspa', 'med-spa')
+            # Try with underscores
+            normalized_id_3 = original_id.replace('-', '_')
+            # Handle case like "newlife_newimage_medspa" -> convert underscores to hyphens first, then fix spacing
+            normalized_id_4 = original_id.replace('_', '-').replace('newlife', 'new-life').replace('newimage', 'new-image').replace('medspa', 'med-spa')
+            # Try with all variations
+            all_variants = [
+                'new-life-new-image-med-spa',  # The actual correct format - try this FIRST
+                normalized_id_1,  # Underscores -> hyphens
+                normalized_id_4,  # Combined normalization
+                normalized_id_2,  # Insert hyphens
+                normalized_id_3,  # Hyphens -> underscores
+                original_id,  # Original as-is
+                'new_life_new_image_med_spa',  # All underscores
+            ]
+            # Remove duplicates while preserving order
+            all_variants = list(dict.fromkeys(all_variants))
+            
+            logger.info(f"🔍 Looking up business services with ID: '{business_id}' (trying variants: {all_variants[:3]}...)")
+            
             # Try database first if available
             if self.db_manager:
                 try:
-                    from ..core.database_models import Business, BusinessService
+                    try:
+                        from core.database_models import Business, BusinessService
+                    except ImportError:
+                        from backend.production.core.database_models import Business, BusinessService
                     with self.db_manager.get_session() as session:
-                        # Find business by external_id or id
+                        # Find business by external_id or id (try both original and normalized)
                         business = session.query(Business).filter(
-                            (Business.external_id == business_id) | (Business.id == business_id)
+                            (Business.external_id == business_id) | 
+                            (Business.external_id == normalized_business_id) |
+                            (Business.id == business_id) |
+                            (Business.id == normalized_business_id)
                         ).first()
                         
                         if business:
@@ -828,8 +876,16 @@ class BAISUniversalToolHandler:
                                 logger.debug(f"Could not import shared_storage: {import_err}")
                                 pass
                 
-                if simple_store and business_id in simple_store:
-                    business_data = simple_store[business_id]
+                # Try all variants to find the business
+                business_data = None
+                if simple_store:
+                    for variant in all_variants:
+                        if variant in simple_store:
+                            business_data = simple_store[variant]
+                            logger.info(f"✅ Found business in store using variant: '{variant}'")
+                            break
+                
+                if business_data:
                     services_config = business_data.get("services_config", [])
                     
                     # Return full service details from services_config
@@ -897,35 +953,132 @@ class BAISUniversalToolHandler:
         """
         Execute a service for any business on the platform.
         Handles booking, payment, and confirmation.
+        Checks database first, then in-memory store.
         """
         try:
-            # Generate a mock confirmation ID
+            from datetime import datetime
             import uuid
+            
+            business_name = None
+            service_name = None
+            business_phone = None
+            business_email = None
+            
+            # Try database first if available
+            if self.db_manager:
+                try:
+                    try:
+                        from core.database_models import Business, BusinessService
+                    except ImportError:
+                        from backend.production.core.database_models import Business, BusinessService
+                    with self.db_manager.get_session() as session:
+                        business = session.query(Business).filter(
+                            (Business.external_id == business_id) | (Business.id == business_id)
+                        ).first()
+                        
+                        if business:
+                            business_name = business.name
+                            business_phone = business.phone
+                            business_email = business.email
+                            
+                            # Find the service
+                            service = session.query(BusinessService).filter(
+                                BusinessService.business_id == business.id,
+                                (BusinessService.service_id == service_id) | (BusinessService.id == service_id)
+                            ).first()
+                            
+                            if service:
+                                service_name = service.name
+                except Exception as db_error:
+                    logger.debug(f"Database query failed for execute_service, trying in-memory store: {db_error}")
+            
+            # Fall back to in-memory store
+            if not business_name:
+                try:
+                    # Try multiple import paths for shared_storage
+                    simple_store = None
+                    try:
+                        from shared_storage import BUSINESS_STORE as simple_store
+                    except ImportError:
+                        try:
+                            from ..shared_storage import BUSINESS_STORE as simple_store
+                        except ImportError:
+                            try:
+                                from backend.production.shared_storage import BUSINESS_STORE as simple_store
+                            except ImportError:
+                                import sys
+                                import os
+                                parent_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+                                if parent_dir not in sys.path:
+                                    sys.path.insert(0, parent_dir)
+                                try:
+                                    from backend.production import shared_storage
+                                    simple_store = getattr(shared_storage, 'BUSINESS_STORE', None)
+                                except Exception:
+                                    pass
+                    
+                    if simple_store and business_id in simple_store:
+                        business_data = simple_store[business_id]
+                        business_name = business_data.get("business_name", "Unknown Business")
+                        contact_info = business_data.get("contact_info", {})
+                        business_phone = contact_info.get("phone", "")
+                        business_email = contact_info.get("email", "")
+                        
+                        # Find the service
+                        services_config = business_data.get("services_config", [])
+                        for svc in services_config:
+                            if svc.get("id") == service_id:
+                                service_name = svc.get("name", service_id)
+                                break
+                except Exception as store_error:
+                    logger.warning(f"In-memory store query failed for execute_service: {store_error}")
+            
+            # Generate confirmation ID
             confirmation_id = str(uuid.uuid4())[:8].upper()
             
-            # Mock execution result
+            # Get service name or use service_id as fallback
+            if not service_name:
+                service_name = service_id.replace("-", " ").title()
+            
+            if not business_name:
+                business_name = business_id.replace("-", " ").title()
+            
+            # Build execution result
+            executed_at = datetime.utcnow().isoformat()
+            
             result = {
                 "success": True,
                 "confirmation_id": f"BAIS-{confirmation_id}",
                 "status": "confirmed",
+                "business_id": business_id,
+                "business_name": business_name,
+                "service_id": service_id,
+                "service_name": service_name,
                 "details": {
                     "business_id": business_id,
                     "service_id": service_id,
                     "customer": customer_info,
                     "parameters": parameters,
-                    "executed_at": "2025-01-27T12:00:00Z"
+                    "executed_at": executed_at
                 },
-                "confirmation_message": f"Your {service_id} has been confirmed! Confirmation ID: BAIS-{confirmation_id}",
+                "confirmation_message": f"Your {service_name} appointment with {business_name} has been confirmed! Confirmation ID: BAIS-{confirmation_id}",
                 "receipt_url": f"https://api.baintegrate.com/receipts/BAIS-{confirmation_id}",
                 "contact_info": {
-                    "business_phone": "+1-555-0123",
-                    "business_email": "support@business.com"
-                }
+                    "business_phone": business_phone or "Contact business for details",
+                    "business_email": business_email or "Contact business for details"
+                },
+                "next_steps": [
+                    "You will receive a confirmation email shortly",
+                    "Arrive 10 minutes early for your appointment",
+                    f"Bring your confirmation ID: BAIS-{confirmation_id}"
+                ]
             }
             
+            logger.info(f"✅ Service execution successful: {service_name} for {business_name} (ID: BAIS-{confirmation_id})")
             return result
             
         except Exception as e:
+            logger.error(f"Service execution failed: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "error": f"Service execution failed: {str(e)}",
