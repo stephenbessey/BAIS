@@ -673,7 +673,6 @@ CRITICAL RULES:
                     # Parse conversation history to find business info
                     if "I searched the BAIS platform and found these businesses:" in conversation_history:
                         # Try to extract business name and services from previous search results
-                        import re
                         # Extract business name pattern
                         name_match = re.search(r'1\.\s+([^\n]+)', conversation_history)
                         if name_match:
