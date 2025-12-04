@@ -1,0 +1,11 @@
+{
+  "demo_businesses": [
+    {
+      "enabled": true,
+      "customer_file": "NewLifeNewImage_CORRECTED_BAIS_Submission.json",
+      "description": "New Life New Image Med Spa - Demo for medical spa industry"
+    }
+  ],
+  "auto_load_on_startup": true,
+  "auto_load_when_database_empty": true
+}

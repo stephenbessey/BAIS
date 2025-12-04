@@ -605,7 +605,22 @@ Let the user know that no businesses were found matching their search, and sugge
                     has_service = any(word in user_message_lower for word in ['laser hair', 'botox', 'filler', 'hydrafacial', 'coolsculpting', 'service'])
                     has_date_time = any(word in user_message_lower for word in ['tomorrow', 'today', 'am', 'pm', 'morning', 'afternoon', 'evening', 'at ', ':', 'book', 'schedule', 'appointment'])
                     has_contact = any(word in user_message_lower for word in ['name', 'email', 'phone', '@', '.com'])
-                    
+
+                    # Prepare conditional text outside f-string to avoid backslash issues
+                    if has_service and has_date_time:
+                        decision_text = f"""- YOU HAVE ALL INFO: IMMEDIATELY call bais_execute_service with:
+  * business_id="{business_id}"
+  * service_id=<matched from above>
+  * parameters={{date/time from conversation}}
+  * customer_info={{name, email, phone from conversation}}"""
+                    else:
+                        decision_text = """- YOU ARE MISSING INFO: Ask ONLY for what's missing, then call bais_execute_service
+- If missing service: Match user's request to service_id from list above
+- If missing date/time: Ask "What date and time would work for you?"
+- If missing contact: Ask "I'll need your name, email, and phone number to complete the booking" """
+
+                    final_instruction = "READY TO BOOK: You have the service and time. Call bais_execute_service now, or ask for missing contact info." if has_date_time else "GATHER INFO: Ask for the missing information needed to complete the booking."
+
                     follow_up_prompt = f"""{system_prompt}
 
 Full Conversation History:
@@ -635,14 +650,7 @@ Required for booking:
 - customer_info: {{"name": "...", "email": "...", "phone": "..."}} (if user provided)
 
 STEP 3: Decision making:
-{("- YOU HAVE ALL INFO: IMMEDIATELY call bais_execute_service with:\n"
-  f"  * business_id=\"{business_id}\"\n"
-  "  * service_id=<matched from above>\n"
-  "  * parameters={date/time from conversation}\n"
-  "  * customer_info={name, email, phone from conversation}") if (has_service and has_date_time) else ("- YOU ARE MISSING INFO: Ask ONLY for what's missing, then call bais_execute_service\n"
-  "- If missing service: Match user's request to service_id from list above\n"
-  "- If missing date/time: Ask \"What date and time would work for you?\"\n"
-  "- If missing contact: Ask \"I'll need your name, email, and phone number to complete the booking\"")}
+{decision_text}
 
 CRITICAL RULES:
 - business_id MUST be "{business_id}" (with hyphens, exactly as shown - do NOT use underscores)
@@ -652,29 +660,52 @@ CRITICAL RULES:
 - DO NOT say "I found some information" - be specific about what you're doing
 - Maintain conversation context - remember everything the user said
 
-{("READY TO BOOK: You have the service and time. Call bais_execute_service now, or ask for missing contact info." if has_date_time else "GATHER INFO: Ask for the missing information needed to complete the booking.")}"""
+{final_instruction}"""
                 elif isinstance(actual_result, dict) and ("error" in actual_result or actual_result.get("services") == [] or len(actual_result.get("services", [])) == 0):
                     # Services not found - this might be a business_id format issue
                     error_msg = actual_result.get('error', 'No services found')
+
+                    # Try to get services from previous search results in conversation history
+                    # Extract business name and services from conversation context
+                    business_name_from_context = "this business"
+                    services_from_context = []
+
+                    # Parse conversation history to find business info
+                    if "I searched the BAIS platform and found these businesses:" in conversation_history:
+                        # Try to extract business name and services from previous search results
+                        import re
+                        # Extract business name pattern
+                        name_match = re.search(r'1\.\s+([^\n]+)', conversation_history)
+                        if name_match:
+                            business_name_from_context = name_match.group(1).strip()
+
+                        # Extract services from context
+                        services_match = re.search(r'Services:\s+([^\n]+)', conversation_history)
+                        if services_match:
+                            services_text = services_match.group(1)
+                            services_from_context = [s.strip() for s in services_text.split(',')]
+
+                    # Build service list text
+                    if services_from_context:
+                        services_list_text = "\n".join([f"- {svc}" for svc in services_from_context])
+                    else:
+                        services_list_text = "(Services were shown in the search results earlier)"
+
                     follow_up_prompt = f"""{system_prompt}
 
 Full Conversation History:
 {conversation_history}User: {last_message}
-Assistant: I encountered a technical issue retrieving detailed service information, but I know from our earlier search that New Life New Image Med Spa offers these services:
+Assistant: I encountered a technical issue retrieving detailed service information, but I can see from our earlier search that {business_name_from_context} offers services.
 
-- Laser Hair Removal
-- Botox Treatment
-- Dermal Fillers
-- HydraFacial MD
-- CoolSculpting Body Contouring
+{services_list_text if services_from_context else ''}
 
 CRITICAL INSTRUCTIONS - READ CAREFULLY:
-- DO NOT say "doesn't have any services" or "no services available" - we KNOW services exist from search results
-- DO NOT suggest finding another business - this business HAS the services the user wants
-- The user said: "{last_message}" - they want to book a service (likely laser hair removal based on context)
+- DO NOT say "doesn't have any services" or "no services available" - services exist from search results
+- DO NOT suggest finding another business - this business has the services the user wants
+- The user said: "{last_message}" - they want to book a service
 - PROCEED WITH BOOKING: Even though we couldn't retrieve detailed service info, we can still help them book
 - Ask for booking details:
-  * Confirm which service they want (match to services listed above)
+  * Confirm which service they want (match to services from earlier search)
   * Ask: "What date and time would you like for your [service name] appointment?"
   * Ask: "I'll need your name, email, and phone number to complete the booking"
 

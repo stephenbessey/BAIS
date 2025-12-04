@@ -82,6 +82,30 @@ BAIS uses a **universal tools architecture**:
 
 ### Configuration
 
+#### Demo Businesses (for development)
+
+BAIS uses a configuration file to load demo businesses, not hard-coded data. This ensures BAIS remains business-agnostic.
+
+Edit `backend/production/config/demo_businesses.json`:
+```json
+{
+  "demo_businesses": [
+    {
+      "enabled": true,
+      "customer_file": "YourBusiness_BAIS_Submission.json",
+      "description": "Your Business - Demo for [industry]"
+    }
+  ],
+  "auto_load_on_startup": true,
+  "auto_load_when_database_empty": true
+}
+```
+
+**Important**: Never hard-code business-specific data. Always use:
+- Configuration files for demos
+- Database for production businesses
+- Customer submission files for business data
+
 #### Ollama Setup (for local LLM)
 
 1. Click the settings icon (⚙️) in the chat interface header
