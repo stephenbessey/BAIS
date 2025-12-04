@@ -344,16 +344,19 @@ CRITICAL WORKFLOW FOR COMPLETE BOOKINGS:
 
 IMPORTANT CONVERSATION RULES:
 - ALWAYS maintain full conversation context - remember everything discussed
-- If user mentions ANY service name (e.g., "laser hair removal", "botox", "I want [service]"):
-  a) IMMEDIATELY call bais_get_business_services with the business_id from earlier search
-  b) DO NOT respond without calling the tool first
-  c) DO NOT search again - you already know which business
-  d) DO NOT say a service is unavailable until you've checked via bais_get_business_services
-- If user says "book [service]" or "I want [service]":
-  a) Call bais_get_business_services first (required)
-  b) Match the service name to service_id
-  c) If you have date/time/contact info, call bais_execute_service immediately
-  d) If missing info, ask for it, then call bais_execute_service
+- CRITICAL: ONLY call bais_get_business_services ONCE per conversation per business
+- If services have ALREADY been retrieved in this conversation:
+  a) DO NOT call bais_get_business_services again - use the services from memory
+  b) If user asks informational questions (e.g., "tell me more", "what is it", "how does it work"), answer from the services you already have
+  c) If user provides booking info (date, time, contact), check if you have ALL info and call bais_execute_service
+- If services have NOT been retrieved yet and user mentions a service name:
+  a) Call bais_get_business_services ONCE with the business_id from earlier search
+  b) DO NOT search again - you already know which business
+  c) After retrieving services, answer the user's question or proceed with booking
+- If user provides booking details (name, email, phone, date, time) AFTER services were retrieved:
+  a) Check conversation history for ALL required info
+  b) If you have service + date/time + contact info, IMMEDIATELY call bais_execute_service
+  c) DO NOT call bais_get_business_services again
 - NEVER say a service is not available if it was mentioned in search results
 - All services returned from bais_get_business_services ARE available for booking
 
@@ -376,10 +379,55 @@ AFTER I execute the tool and provide results:
     
     last_message = messages[-1].content if messages else ""
     
+    # Check conversation history to detect context and prevent unnecessary tool calls
+    conversation_text = conversation_history + " " + last_message
+    conversation_lower = conversation_text.lower()
+    
+    # Detect if services were already retrieved
+    services_already_retrieved = "bais_get_business_services" in conversation_history and ("services" in conversation_history.lower() or "service" in conversation_history.lower())
+    
+    # Detect if this is an informational question
+    informational_phrases = ["tell me more", "what is", "how does", "explain", "describe", "know more", "more about", "what about", "information about", "details about"]
+    is_informational_question = any(phrase in last_message.lower() for phrase in informational_phrases)
+    
+    # Detect booking information in full conversation
+    has_service = any(word in conversation_lower for word in ['hydrafacial', 'laser hair', 'botox', 'filler', 'coolsculpting', 'dermal fillers', 'dermal filler'])
+    has_date_time = any(word in conversation_lower for word in ['tomorrow', 'today', 'am', 'pm', 'morning', 'afternoon', 'evening', 'at ', ':', '4 pm', '4pm', '7 pm', '7pm']) or re.search(r'\d{1,2}\s*(am|pm|AM|PM)', conversation_text)
+    has_email = bool(re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', conversation_text))
+    has_phone = bool(re.search(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', conversation_text)) or bool(re.search(r'\d{3}[-\s]?\d{3}[-\s]?\d{4}', conversation_text))
+    contact_pattern = r'[a-zA-Z]+\s*,\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\s*,\s*\d{3}[-.]?\d{3}[-.]?\d{4}'
+    contact_in_message = bool(re.search(contact_pattern, conversation_text, re.IGNORECASE))
+    has_name = any(pattern in conversation_lower for pattern in ['name is', 'i am', 'my name', 'call me', 'i\'m', 'stephen'])
+    has_contact = has_email or has_phone or has_name or contact_in_message
+    
+    # Add context-specific instructions to system prompt
+    context_instruction = ""
+    if services_already_retrieved and is_informational_question:
+        # Services already retrieved, user asking info question - answer from context, don't call tools
+        context_instruction = "\n\n🔵 CURRENT CONTEXT: Services have ALREADY been retrieved in this conversation. The user is asking an informational question. Answer their question using the service information you already have. DO NOT call bais_get_business_services again - you already have the information!"
+    elif services_already_retrieved and has_service and has_date_time and has_contact:
+        # Services retrieved, all booking info available - execute booking
+        context_instruction = "\n\n🟢 CURRENT CONTEXT: Services have ALREADY been retrieved. The user has provided ALL booking information (service, date/time, contact). IMMEDIATELY call bais_execute_service - DO NOT call bais_get_business_services again!"
+    elif services_already_retrieved:
+        # Services retrieved, but booking info incomplete
+        missing = []
+        if not has_service:
+            missing.append("service name")
+        if not has_date_time:
+            missing.append("date/time")
+        if not has_contact:
+            missing.append("contact info (name, email, phone)")
+        context_instruction = f"\n\n🟡 CURRENT CONTEXT: Services have ALREADY been retrieved. The user still needs to provide: {', '.join(missing)}. Ask for missing info, then call bais_execute_service. DO NOT call bais_get_business_services again!"
+    elif services_already_retrieved and ("?" in last_message or "help" in last_message.lower() or "what" in last_message.lower()):
+        # Services retrieved, user asking clarifying question
+        context_instruction = "\n\n🔵 CURRENT CONTEXT: Services have ALREADY been retrieved. The user is asking a question. Answer from the services you already have. DO NOT call bais_get_business_services again!"
+    
+    system_prompt_with_context = system_prompt + context_instruction
+    
     if conversation_history:
-        full_prompt = f"{system_prompt}\n\nConversation:\n{conversation_history}User: {last_message}\nAssistant:"
+        full_prompt = f"{system_prompt_with_context}\n\nConversation:\n{conversation_history}User: {last_message}\nAssistant:"
     else:
-        full_prompt = f"{system_prompt}\n\nUser: {last_message}\nAssistant:"
+        full_prompt = f"{system_prompt_with_context}\n\nUser: {last_message}\nAssistant:"
     
     ollama_url = f"{host}/api/generate"
     payload = {
@@ -600,33 +648,146 @@ Let the user know that no businesses were found matching their search, and sugge
                     
                     business_id = actual_result.get('business_id', '')
                     
-                    # Extract what the user already provided from conversation history
-                    user_message_lower = last_message.lower()
-                    has_service = any(word in user_message_lower for word in ['laser hair', 'botox', 'filler', 'hydrafacial', 'coolsculpting', 'service'])
-                    has_date_time = any(word in user_message_lower for word in ['tomorrow', 'today', 'am', 'pm', 'morning', 'afternoon', 'evening', 'at ', ':', 'book', 'schedule', 'appointment'])
-                    has_contact = any(word in user_message_lower for word in ['name', 'email', 'phone', '@', '.com'])
+                    # Check if services have already been retrieved in this conversation
+                    already_has_services = "bais_get_business_services" in conversation_history and ("services" in conversation_history.lower() or "service" in conversation_history.lower())
+                    
+                    # Extract what the user already provided from FULL conversation history (not just last message)
+                    conversation_text = conversation_history + " " + last_message
+                    conversation_lower = conversation_text.lower()
+                    last_message_lower = last_message.lower()
+                    
+                    # Detect service mention in full conversation
+                    has_service = any(word in conversation_lower for word in ['laser hair', 'botox', 'filler', 'hydrafacial', 'coolsculpting', 'dermal fillers', 'dermal filler'])
+                    
+                    # Detect date/time in full conversation (including time patterns like "7 pm", "7pm", etc.)
+                    time_patterns = ['tomorrow', 'today', 'am', 'pm', 'morning', 'afternoon', 'evening', 'at ', ':', 'book', 'schedule', 'appointment', '7 pm', '8 am', '9pm', '3pm']
+                    has_date_time = any(word in conversation_lower for word in time_patterns) or re.search(r'\d{1,2}\s*(am|pm|AM|PM)', conversation_text)
+                    
+                    # Better contact info detection using regex patterns
+                    has_email = bool(re.search(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', conversation_text))
+                    has_phone = bool(re.search(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', conversation_text)) or bool(re.search(r'\d{3}[-\s]?\d{3}[-\s]?\d{4}', conversation_text))
+                    # Check for name mentions (common patterns)
+                    name_patterns = ['name is', 'i am', 'my name', 'call me', 'i\'m', 'this is']
+                    has_name = any(pattern in conversation_lower for pattern in name_patterns)
+                    # Also check if user message contains what looks like contact info (comma-separated values like "stephen, s@gmail.com, 555-555-5555")
+                    contact_pattern = r'[a-zA-Z]+\s*,\s*[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\s*,\s*\d{3}[-.]?\d{3}[-.]?\d{4}'
+                    contact_in_message = bool(re.search(contact_pattern, conversation_text, re.IGNORECASE))
+                    has_contact = has_email or has_phone or has_name or contact_in_message or any(word in conversation_lower for word in ['name', 'email', 'phone', '@', '.com', '.gmail'])
+                    
+                    # Detect if this is a confirmation message (user saying "okay", "yes", "sure", etc.)
+                    confirmation_words = ['okay', 'ok', 'yes', 'sure', 'go ahead', 'sounds good', 'perfect', 'that works', 'yep', 'yeah']
+                    is_confirmation = any(word in last_message_lower for word in confirmation_words) and len(last_message_lower.strip()) < 20
+                    
+                    # Detect clarification questions like "help me with what? booking?" or just "?"
+                    clarification_patterns = ['help me with what', 'what do you mean', 'booking', 'what are you', 'what did you', '?']
+                    is_clarification = any(pattern in last_message_lower for pattern in clarification_patterns) and ('?' in last_message or 'help' in last_message_lower or last_message.strip() == '?')
+                    
+                    # If clarification question AND we have all info, it means they're ready to book
+                    if is_clarification and has_service and has_date_time and has_contact:
+                        is_confirmation = True
+                    
+                    # If user says just "?" after we said "I found some information", they're asking what we're doing - clarify and execute
+                    if last_message.strip() == '?' and has_service and has_date_time and has_contact:
+                        is_confirmation = True
 
-                    # Prepare conditional text outside f-string to avoid backslash issues
-                    if has_service and has_date_time:
-                        decision_text = f"""- YOU HAVE ALL INFO: IMMEDIATELY call bais_execute_service with:
+                    # Prepare conditional text based on what we have
+                    # Handle clarification questions that indicate readiness to book
+                    if is_clarification and has_service and has_date_time and has_contact:
+                        # User is clarifying/confirming - they're ready, execute booking
+                        decision_text = f"""🚨 USER CLARIFICATION = CONFIRMATION! User said "{last_message}" - they're asking what you're doing, which means they're READY TO BOOK!
+
+ALL INFORMATION IS AVAILABLE:
+- Service: ✅ (mentioned in conversation)
+- Date/Time: ✅ (mentioned in conversation)  
+- Contact Info: ✅ (mentioned in conversation)
+
+IMMEDIATELY call bais_execute_service RIGHT NOW:
+  * business_id="{business_id}" (use EXACTLY this - hyphens, not underscores)
+  * service_id=<match service name from conversation to service_id in list above>
+  * parameters={{date/time from conversation - extract "tomorrow", "4 pm", etc.}}
+  * customer_info={{name, email, phone from conversation - extract from conversation history}}
+
+DO NOT call bais_get_business_services - you already have services!
+DO NOT ask questions - just execute the booking!"""
+                    # If it's a confirmation and we have all info, STRONGLY push to execute
+                    elif is_confirmation and has_service and has_date_time and has_contact:
+                        # CONFIRMATION + ALL INFO = IMMEDIATE EXECUTION
+                        decision_text = f"""🚨 URGENT: User said "{last_message}" - this is a CONFIRMATION! They've already provided ALL information!
+
+IMMEDIATELY call bais_execute_service RIGHT NOW - NO DELAY, NO QUESTIONS:
+  * business_id="{business_id}" (use EXACTLY this - hyphens, not underscores)
+  * service_id=<match service name from conversation to service_id in list above>
+  * parameters={{date/time from conversation - extract "tomorrow", "7 pm", etc.}}
+  * customer_info={{name, email, phone from conversation - extract from conversation history}}
+
+DO NOT call bais_get_business_services - you already have services!
+DO NOT ask questions - the user is confirming, so execute the booking NOW!"""
+                    elif has_service and has_date_time and has_contact:
+                        # ALL INFO AVAILABLE - STRONG PUSH TO EXECUTE
+                        decision_text = f"""CRITICAL: YOU HAVE EVERYTHING NEEDED TO BOOK!
+- Service: ✅ (mentioned in conversation: check conversation history)
+- Date/Time: ✅ (mentioned in conversation: check conversation history)  
+- Contact Info: ✅ (mentioned in conversation: check conversation history)
+
+IMMEDIATELY call bais_execute_service NOW - do NOT call any other tools, do NOT ask for more info:
+  * business_id="{business_id}" (use EXACTLY this - hyphens, not underscores)
+  * service_id=<match service name from conversation to service_id in list above>
+  * parameters={{date/time from conversation - extract "tomorrow", "7 pm", etc.}}
+  * customer_info={{name, email, phone from conversation - extract from conversation history}}
+
+DO NOT call bais_get_business_services again - you already have the services!
+DO NOT say "I found some information" or ask questions - CALL bais_execute_service NOW!"""
+                    elif has_service and has_date_time:
+                        # Missing contact info
+                        decision_text = f"""- YOU HAVE SERVICE AND TIME: You need contact info
+- Ask: "I'll need your name, email, and phone number to complete the booking"
+- Once they provide it, IMMEDIATELY call bais_execute_service with:
   * business_id="{business_id}"
   * service_id=<matched from above>
   * parameters={{date/time from conversation}}
-  * customer_info={{name, email, phone from conversation}}"""
+  * customer_info={{name, email, phone from their response}}"""
+                    elif has_service:
+                        # Missing date/time and possibly contact
+                        decision_text = f"""- YOU HAVE SERVICE: You need date/time and contact info
+- Ask: "What date and time would work for you?"
+- After they provide date/time, ask for contact info, then call bais_execute_service"""
                     else:
+                        # Missing service or other info
                         decision_text = """- YOU ARE MISSING INFO: Ask ONLY for what's missing, then call bais_execute_service
 - If missing service: Match user's request to service_id from list above
 - If missing date/time: Ask "What date and time would work for you?"
 - If missing contact: Ask "I'll need your name, email, and phone number to complete the booking" """
 
-                    final_instruction = "READY TO BOOK: You have the service and time. Call bais_execute_service now, or ask for missing contact info." if has_date_time else "GATHER INFO: Ask for the missing information needed to complete the booking."
+                    # Final instruction based on completeness
+                    if is_clarification and has_service and has_date_time and has_contact:
+                        final_instruction = "🚨🚨 USER CLARIFICATION = READY TO BOOK! Execute bais_execute_service IMMEDIATELY - do NOT call any other tool!"
+                    elif is_confirmation and has_service and has_date_time and has_contact:
+                        final_instruction = "🚨🚨 URGENT: USER CONFIRMED - EXECUTE BOOKING NOW! Call bais_execute_service IMMEDIATELY - do NOT call any other tool!"
+                    elif has_service and has_date_time and has_contact:
+                        final_instruction = "🚨 CRITICAL: ALL INFO COLLECTED - CALL bais_execute_service IMMEDIATELY! Do NOT call bais_get_business_services again!"
+                    elif has_service and has_date_time:
+                        final_instruction = "READY TO BOOK: You have service and time. Ask for contact info, then call bais_execute_service."
+                    elif has_service:
+                        final_instruction = "GATHER INFO: Ask for date/time and contact info, then call bais_execute_service."
+                    else:
+                        final_instruction = "GATHER INFO: Ask for the missing information needed to complete the booking."
 
+                    # Add warning if services were already retrieved - this should NOT happen since we just retrieved them
+                    duplicate_warning = "\n\n✅ SERVICES RETRIEVED: You just called bais_get_business_services and received the services list below. DO NOT call bais_get_business_services again in your next response - use this information!\n"
+                    
+                    # Detect if user is asking an informational question
+                    informational_phrases = ["tell me more", "what is", "how does", "explain", "describe", "know more", "more about", "what about", "information about", "details about", "like to know", "want to know"]
+                    is_info_question = any(phrase in last_message_lower for phrase in informational_phrases)
+                    
+                    if is_info_question:
+                        duplicate_warning += "\n📋 USER WANTS INFORMATION: The user is asking for information about the service. Provide detailed information from the services list below. DO NOT call any tools - just answer their question naturally.\n"
+                    
                     follow_up_prompt = f"""{system_prompt}
 
 Full Conversation History:
 {conversation_history}User: {last_message}
 Assistant: I retrieved the available services from {business_name}.
-
+{duplicate_warning}
 Here are ALL available services (business_id: "{business_id}" - use EXACTLY this format with hyphens):
 
 {services_text}
@@ -636,29 +797,34 @@ Service ID mapping (use these EXACT service_ids when calling bais_execute_servic
 
 BOOKING WORKFLOW - Follow these steps:
 
-STEP 1: Identify what the user wants:
-- Review conversation history - user said: "{last_message}"
-- What service did they mention? Match it to a service_id above (be flexible: "laser hair removal" = "laser-hair-removal-service")
-- What date/time did they specify? Extract it.
-- Do they have contact info? Check conversation history.
+STEP 1: Identify what the user wants from FULL conversation history:
+- Review ENTIRE conversation history (not just last message) - user said: "{last_message}"
+- What service did they mention ANYWHERE in the conversation? Match it to a service_id above (be flexible: "laser hair removal" = "laser-hair-removal-service", "dermal fillers" = "dermal-filler-service")
+- What date/time did they specify ANYWHERE? Extract it (e.g., "tomorrow at 7 pm", "tomorrow at 7pm")
+- Do they have contact info ANYWHERE in conversation? Check for emails, phone numbers, names
 
-STEP 2: Check if you have ALL required information:
+STEP 2: Check if you have ALL required information (check FULL conversation, not just last message):
 Required for booking:
 - business_id: "{business_id}" (use EXACTLY this - it has hyphens, not underscores)
-- service_id: from the mapping above (based on service name user mentioned)
-- parameters: {{"date": "...", "time": "..."}} (if user provided date/time)
-- customer_info: {{"name": "...", "email": "...", "phone": "..."}} (if user provided)
+- service_id: from the mapping above (based on service name user mentioned in conversation)
+- parameters: {{"date": "...", "time": "..."}} (extract from conversation - look for "tomorrow", "today", time patterns)
+- customer_info: {{"name": "...", "email": "...", "phone": "..."}} (extract from conversation - look for email patterns, phone patterns, names)
 
 STEP 3: Decision making:
 {decision_text}
 
 CRITICAL RULES:
-- business_id MUST be "{business_id}" (with hyphens, exactly as shown - do NOT use underscores)
+- business_id MUST be "{business_id}" (with hyphens, exactly as shown - do NOT use underscores or create new formats)
 - ALL services listed above ARE available - never say a service is unavailable
-- Once you have service_id, date/time, and contact info, IMMEDIATELY call bais_execute_service
-- DO NOT call bais_get_business_services again - you already have the services
-- DO NOT say "I found some information" - be specific about what you're doing
-- Maintain conversation context - remember everything the user said
+- YOU JUST RETRIEVED SERVICES - do NOT call bais_get_business_services again in your response
+- If user asked an informational question: Answer from the services list above - DO NOT call any tools
+- If user provided booking info: Check if you have ALL info (service + date/time + contact), then IMMEDIATELY call bais_execute_service
+- NEVER say "I found some information" or "Let me help you with that" - these are vague and confusing
+- Instead: If you have all info, call bais_execute_service. If missing info, specifically state what you need.
+- If all info is available: Be specific and call bais_execute_service with the details
+- If info is missing: Be specific about what's missing and ask for it
+- Maintain conversation context - remember EVERYTHING the user said in the full conversation
+- If user says "okay", "yes", "help me with what? booking?" - they are confirming/ready - proceed with booking if you have all info
 
 {final_instruction}"""
                 elif isinstance(actual_result, dict) and ("error" in actual_result or actual_result.get("services") == [] or len(actual_result.get("services", [])) == 0):
@@ -673,7 +839,6 @@ CRITICAL RULES:
                     # Parse conversation history to find business info
                     if "I searched the BAIS platform and found these businesses:" in conversation_history:
                         # Try to extract business name and services from previous search results
-                        import re
                         # Extract business name pattern
                         name_match = re.search(r'1\.\s+([^\n]+)', conversation_history)
                         if name_match:
